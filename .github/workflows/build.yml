@@ -42,9 +42,22 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: npm run build:linux
 
+      - name: Zip dist folder
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: Compress-Archive -Path dist\* -DestinationPath release\nyaa-viewer-dist.zip
+
+      - name: Zip dist folder
+        if: matrix.os == 'macos-latest' || matrix.os == 'ubuntu-latest'
+        run: zip -r release/nyaa-viewer-dist.zip dist/*
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: build-${{ matrix.os }}
-          path: release/
+          path: |
+            release/nyaa-viewer-dist.zip
+            release/*.exe
+            release/*.AppImage
+            release/*.dmg
           retention-days: 30
