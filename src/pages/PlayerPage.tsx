@@ -100,7 +100,7 @@ export default function PlayerPage() {
       // Upload magnet
       setTorrentStatus('Uploading magnet to AllDebrid...');
       const uploadResult = await window.electronAPI.uploadMagnet(torrentData.magnetUri);
-      const magnetData = uploadResult as { id?: number; error?: string };
+      const magnetData = uploadResult as { id?: number; ready?: boolean; status?: string; error?: string };
 
       if (!magnetData.id) {
         setError(`Failed to upload magnet: ${magnetData.error || 'Unknown error'}`);
@@ -110,10 +110,9 @@ export default function PlayerPage() {
 
       const torrentId = magnetData.id;
 
-      // Check immediately — cached torrents are already ready
-      const initialStatus = await window.electronAPI.getTorrentStatus(torrentId) as { ready?: boolean; status?: string };
-      if (initialStatus?.ready) {
-        // Skip polling, go straight to file list
+      // Check if already ready from upload response (cached torrents)
+      if (magnetData.ready) {
+        setTorrentStatus('Fetching file list...');
       } else {
         setTorrentStatus('Waiting for AllDebrid to download torrent...');
 
@@ -125,6 +124,7 @@ export default function PlayerPage() {
           const status = await window.electronAPI.getTorrentStatus(torrentId) as { ready?: boolean; status?: string };
 
           if (status?.ready) {
+            setTorrentStatus('Fetching file list...');
             break;
           }
 

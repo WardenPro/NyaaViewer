@@ -49,7 +49,7 @@ export class AllDebridService {
     }
   }
 
-  async uploadMagnet(magnetUri: string): Promise<{ id?: number; error?: string }> {
+  async uploadMagnet(magnetUri: string): Promise<{ id?: number; ready?: boolean; statusCode?: number; status?: string; error?: string }> {
     this.ensureKey();
 
     try {
@@ -63,7 +63,17 @@ export class AllDebridService {
       const data = response.data;
       if (data?.status === 'success' && data?.data?.magnets?.length > 0) {
         const magnet = data.data.magnets[0];
-        return { id: magnet.id };
+        console.log('[AllDebrid upload response]', JSON.stringify({
+          id: magnet.id,
+          statusCode: magnet.statusCode,
+          statusString: magnet.status,
+        }, null, 2));
+        return {
+          id: magnet.id,
+          ready: magnet.statusCode === 3,
+          statusCode: magnet.statusCode,
+          status: magnet.status,
+        };
       }
 
       return { error: data?.error?.message || 'Failed to upload magnet' };
