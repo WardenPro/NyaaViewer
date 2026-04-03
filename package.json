@@ -37,6 +37,11 @@
     "vite-plugin-electron-renderer": "^0.14.0"
   },
   "build": {
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "node_modules/**/*"
+    ],
     "extraFiles": [
       {
         "from": "bin/",
