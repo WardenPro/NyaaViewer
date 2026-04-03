@@ -16,10 +16,16 @@ export default function SettingsPage() {
   const [testError, setTestError] = useState('');
   const [updateStatus, setUpdateStatus] = useState('');
   const [updateProgress, setUpdateProgress] = useState(0);
+  const [appVersion, setAppVersion] = useState('0.1.0');
 
   useEffect(() => {
     setApiKeyInput(allDebridApiKey);
     loadSavedApiKey();
+  }, []);
+
+  // Load app version
+  useEffect(() => {
+    window.electronAPI.getAppVersion().then(v => setAppVersion(v));
   }, []);
 
   // Auto-update status listener
@@ -183,7 +189,7 @@ export default function SettingsPage() {
       {/* About */}
       <div className="card space-y-3">
         <h3 className="text-lg font-semibold">About</h3>
-        <p className="text-sm text-dark-textMuted">NyaaViewer v0.1.0</p>
+        <p className="text-sm text-dark-textMuted">NyaaViewer v{appVersion}</p>
         <p className="text-xs text-dark-textMuted">
           Search nyaa.si torrents, deborid via AllDebrid, and stream MKV files with subtitles.
         </p>

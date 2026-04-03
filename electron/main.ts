@@ -75,6 +75,9 @@ function setupAutoUpdater() {
     }
     return { error: 'Auto-updater not initialized' };
   });
+
+  // Expose app version
+  ipcMain.handle('get-app-version', () => app.getVersion());
 }
 
 function createWindow(): void {

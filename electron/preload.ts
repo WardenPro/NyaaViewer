@@ -57,6 +57,8 @@ const api = {
     ipcRenderer.invoke('check-for-updates'),
   onUpdateStatus: (callback: (data: { type: string; version?: string; percent?: number; message?: string }) => void) =>
     ipcRenderer.on('auto-update:status', (_event, data) => callback(data)),
+  getAppVersion: () =>
+    ipcRenderer.invoke('get-app-version'),
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);
@@ -88,6 +90,7 @@ export interface ElectronAPI {
   // Auto-update
   checkForUpdates: () => Promise<{ checking?: boolean; error?: string }>;
   onUpdateStatus: (callback: (data: { type: string; version?: string; percent?: number; message?: string }) => void) => void;
+  getAppVersion: () => Promise<string>;
 }
 
 declare global {
