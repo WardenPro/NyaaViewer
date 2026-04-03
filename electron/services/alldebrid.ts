@@ -131,36 +131,39 @@ export class AllDebridService {
       });
 
       const data = response.data;
-      console.log('[AllDebrid files response]', JSON.stringify(data, null, 2));
+      const debugPath = require('path').join(require('os').tmpdir(), 'nyaa-debug.json');
+      require('fs').writeFileSync(debugPath, JSON.stringify(data, null, 2));
+      console.log('[AllDebrid] Debug written to:', debugPath);
       if (data?.status === 'success') {
         const magnetData = data.data?.magnets || data.data?.magnet;
         const magnet = Array.isArray(magnetData) ? magnetData[0] : magnetData;
 
-        // Files are in links[].files[] (each .mkv/.mp4 is a "link", files[] contains sub-files)
-        // Or magnet.links[] contains direct download links with their files
+        // Files could be at:
+        // 1. magnet.files[] (flat array in magnet object)
+        // 2. magnet.links[].files[]
+        // 3. magnet.links[] where each link is a direct file
+        const files = magnet?.files || [];
         const links = magnet?.links || [];
-        console.log('[AllDebrid links found]', links.length);
+        console.log('[AllDebrid] magnet.files:', files.length, 'magnet.links:', links.length);
 
-        // Collect all files from all links (for zip/rar archives, files are in links[].files[])
-        const allFiles: Array<{ path: string; size: number; id: number }> = [];
-        for (const link of links) {
-          console.log('[AllDebrid link]', link?.filename, link?.link, 'files:', link?.files?.length || 0);
-          const files = link?.files || [];
-          for (const f of files) {
-            allFiles.push({
-              path: f?.n || f?.filename || f?.path || (link?.filename || ''),
-              size: f?.size || link?.size || 0,
-              id: f?.id || 0,
-            });
-          }
-          // If the link itself is a direct file (no sub-files), add it too
-          if (files.length === 0 && link?.filename) {
-            allFiles.push({
-              path: link.filename,
-              size: link.size || 0,
-              id: 0,
-            });
-          }
+        let allFiles: Array<{ path: string; size: number; id: number }> = [];
+
+        // Try magnet.files first
+        if (files.length > 0) {
+          allFiles = files.map((f: any) => ({
+            path: f?.n || f?.filename || f?.path || '',
+            size: f?.size || 0,
+            id: f?.id || 0,
+          }));
+        }
+
+        // Fallback: extract from links
+        if (allFiles.length === 0 && links.length > 0) {
+          allFiles = links.map((link: any, idx: number) => ({
+            path: link?.filename || `file-${idx + 1}`,
+            size: link?.size || 0,
+            id: idx + 1,
+          }));
         }
 
         console.log('[AllDebrid total files]', allFiles.length);

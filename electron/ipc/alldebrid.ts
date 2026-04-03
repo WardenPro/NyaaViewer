@@ -37,4 +37,12 @@ export function registerAllDebridHandlers(): void {
   ipcMain.handle('get-alldebrid-key', async (): Promise<string | null> => {
     return allDebridService.getApiKey();
   });
+
+  ipcMain.handle('get-debug-file', async (): Promise<string | null> => {
+    try {
+      return require('fs').readFileSync(require('path').join(require('os').tmpdir(), 'nyaa-debug.json'), 'utf-8');
+    } catch {
+      return null;
+    }
+  });
 }

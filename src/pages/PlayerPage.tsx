@@ -36,6 +36,8 @@ export default function PlayerPage() {
   const [selectedSubtitle, setSelectedSubtitle] = useState<string>('');
   const [error, setError] = useState('');
   const [pollProgress, setPollProgress] = useState(0);
+  const [showDebug, setShowDebug] = useState(false);
+  const [debugContent, setDebugContent] = useState('');
 
   // Auto-start the torrent-to-playback flow
   useEffect(() => {
@@ -275,12 +277,22 @@ export default function PlayerPage() {
 
   // Error state
   if (error) {
+    const handleShowDebug = async () => {
+      setShowDebug(!showDebug);
+      if (!debugContent) {
+        const content = await window.electronAPI.getDebugFile();
+        setDebugContent(content || 'No debug data available');
+      }
+    };
     return (
       <div className="p-6 h-full flex flex-col items-center justify-center space-y-4">
         <div className="card border-red-800 bg-red-900/20 max-w-lg text-center space-y-4">
           <p className="text-red-400 text-lg font-semibold">Playback Error</p>
-          <p className="text-dark-textMuted">{error}</p>
+          <p className="text-dark-textMuted whitespace-pre-wrap">{error}</p>
           <div className="flex gap-3 justify-center">
+            <button onClick={handleShowDebug} className="btn-secondary text-xs">
+              {showDebug ? 'Hide Debug' : 'Debug Info'}
+            </button>
             <button onClick={() => navigate('/search')} className="btn-primary">
               Back to Search
             </button>
@@ -288,6 +300,11 @@ export default function PlayerPage() {
               Check Settings
             </button>
           </div>
+          {showDebug && (
+            <pre className="text-left text-xs bg-black/30 p-3 rounded max-h-96 overflow-auto text-green-400 whitespace-pre-wrap">
+              {debugContent || 'Loading...'}
+            </pre>
+          )}
         </div>
       </div>
     );
