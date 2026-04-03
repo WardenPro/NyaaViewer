@@ -139,26 +139,30 @@ export default function PlayerPage() {
       const fileList = (files as TorrentFile[]) || [];
       setTorrentFiles(fileList);
 
-      // Filter MKV files
-      const mkvFiles = fileList
-        .filter((f) => f.path?.toLowerCase().endsWith('.mkv'))
+      // Filter video files (mkv, mp4, webm, avi)
+      const videoExtensions = ['.mkv', '.mp4', '.webm', '.avi', '.mov', '.wmv'];
+      const videoFiles = fileList
+        .filter((f) => {
+          const ext = '.' + (f.path?.split('.').pop() || '').toLowerCase();
+          return videoExtensions.includes(ext);
+        })
         .sort((a, b) => (b.size || 0) - (a.size || 0));
 
-      if (mkvFiles.length > 1) {
-        // Multiple MKV files - let user choose
+      if (videoFiles.length > 1) {
+        // Multiple video files - let user choose
         setTorrentStatus('Select a file to watch');
         setIsLoading(false);
         return;
       }
 
-      if (mkvFiles.length === 0) {
-        setError('No MKV files found in this torrent');
+      if (videoFiles.length === 0) {
+        setError('No video files found in this torrent');
         setIsLoading(false);
         return;
       }
 
-      // Single MKV file - auto play
-      await playFile(mkvFiles[0]);
+      // Single video file - auto play
+      await playFile(videoFiles[0]);
     } catch (e: unknown) {
       setError(`Error: ${(e as Error)?.message || 'Unknown error'}`);
       setIsLoading(false);
@@ -281,10 +285,14 @@ export default function PlayerPage() {
     );
   }
 
-  // File selection (multiple MKV files)
+  // File selection (multiple video files)
   if (torrentFiles.length > 0 && !player.isPlaying) {
-    const mkvFiles = torrentFiles
-      .filter((f) => f.path?.toLowerCase().endsWith('.mkv'))
+    const videoExtensions = ['.mkv', '.mp4', '.webm', '.avi', '.mov', '.wmv'];
+    const videoFiles = torrentFiles
+      .filter((f) => {
+        const ext = '.' + (f.path?.split('.').pop() || '').toLowerCase();
+        return videoExtensions.includes(ext);
+      })
       .sort((a, b) => (b.size || 0) - (a.size || 0));
 
     return (
@@ -299,7 +307,7 @@ export default function PlayerPage() {
         <p className="text-dark-textMuted mb-6">Select a file to watch:</p>
 
         <div className="space-y-2 max-w-2xl">
-          {mkvFiles.map((file) => (
+          {videoFiles.map((file) => (
             <button
               key={file.id}
               onClick={() => playFile(file)}
@@ -317,12 +325,18 @@ export default function PlayerPage() {
             </button>
           ))}
 
-          {/* Show non-MKV files as info */}
-          {torrentFiles.filter((f) => !f.path?.toLowerCase().endsWith('.mkv')).length > 0 && (
+          {/* Show non-video files as info */}
+          {torrentFiles.filter((f) => {
+            const ext = '.' + (f.path?.split('.').pop() || '').toLowerCase();
+            return !videoExtensions.includes(ext);
+          }).length > 0 && (
             <div className="mt-4">
               <p className="text-sm text-dark-textMuted mb-2">Other files in torrent:</p>
               {torrentFiles
-                .filter((f) => !f.path?.toLowerCase().endsWith('.mkv'))
+                .filter((f) => {
+                  const ext = '.' + (f.path?.split('.').pop() || '').toLowerCase();
+                  return !videoExtensions.includes(ext);
+                })
                 .slice(0, 5)
                 .map((f) => (
                   <p key={f.id} className="text-xs text-dark-textMuted px-3 py-1 truncate">
