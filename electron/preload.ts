@@ -17,8 +17,8 @@ const api = {
     ipcRenderer.invoke('get-torrent-status', torrentId),
   getTorrentFiles: (torrentId: number) =>
     ipcRenderer.invoke('get-torrent-files', torrentId),
-  unlockLink: (fileId: number) =>
-    ipcRenderer.invoke('unlock-link', fileId),
+  unlockLink: (fileLink: string) =>
+    ipcRenderer.invoke('unlock-link', fileLink),
   setAllDebridKey: (apiKey: string) =>
     ipcRenderer.invoke('set-alldebrid-key', apiKey),
   getAllDebridKey: () =>
@@ -73,7 +73,7 @@ export interface ElectronAPI {
   uploadMagnet: (magnetUri: string) => Promise<unknown>;
   getTorrentStatus: (torrentId: number) => Promise<unknown>;
   getTorrentFiles: (torrentId: number) => Promise<unknown>;
-  unlockLink: (fileId: number) => Promise<{ success: boolean; link?: string; error?: string }>;
+  unlockLink: (fileLink: string) => Promise<{ success: boolean; link?: string; error?: string }>;
   setAllDebridKey: (apiKey: string) => Promise<void>;
   getAllDebridKey: () => Promise<string | null>;
   startPlayback: (url: string) => Promise<{ success: boolean; error?: string }>;

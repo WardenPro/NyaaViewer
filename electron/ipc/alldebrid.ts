@@ -25,8 +25,8 @@ export function registerAllDebridHandlers(): void {
     return allDebridService.getTorrentFiles(torrentId);
   });
 
-  ipcMain.handle('unlock-link', async (_event, fileId: number) => {
-    return allDebridService.unlockFileById(fileId);
+  ipcMain.handle('unlock-link', async (_event, fileLink: string) => {
+    return allDebridService.unlockFile(fileLink);
   });
 
   ipcMain.handle('set-alldebrid-key', async (_event, apiKey: string) => {

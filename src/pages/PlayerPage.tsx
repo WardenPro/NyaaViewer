@@ -16,6 +16,7 @@ interface TorrentFile {
   path: string;
   size: number;
   id: number;
+  link?: string;
 }
 
 export default function PlayerPage() {
@@ -187,7 +188,13 @@ export default function PlayerPage() {
     setTorrentStatus(`Unlocking "${file.path}" for streaming...`);
 
     try {
-      const unlockResult = await window.electronAPI.unlockLink(file.id);
+      if (!file.link) {
+        setError(`No download link available for "${file.path}"`);
+        setIsLoading(false);
+        return;
+      }
+
+      const unlockResult = await window.electronAPI.unlockLink(file.link);
       const unlockData = unlockResult as { success: boolean; link?: string; error?: string };
 
       if (!unlockData.success || !unlockData.link) {

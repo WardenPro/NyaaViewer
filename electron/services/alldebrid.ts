@@ -10,11 +10,13 @@ export class AllDebridService {
     this.client = axios.create({
       baseURL: AD_BASE,
       timeout: 30000,
+      headers: { 'Content-Type': 'application/json' },
     });
   }
 
   setApiKey(key: string): void {
     this.apikey = key;
+    this.client.defaults.headers.common['Authorization'] = `Bearer ${key}`;
   }
 
   getApiKey(): string | null {
@@ -24,7 +26,7 @@ export class AllDebridService {
   async verifyKey(key: string): Promise<{ success: boolean; error?: string; username?: string }> {
     try {
       const response = await this.client.get('/v4/user', {
-        params: { apikey: key },
+        headers: { Authorization: `Bearer ${key}` },
       });
 
       if (response.data?.status === 'success' && response.data?.data?.user) {
@@ -53,11 +55,11 @@ export class AllDebridService {
     this.ensureKey();
 
     try {
-      const response = await this.client.post('/v4/magnet/upload', null, {
-        params: {
-          apikey: this.apikey,
-          magnets: magnetUri,
-        },
+      const params = new URLSearchParams();
+      params.append('magnets', magnetUri);
+
+      const response = await this.client.post('/v4/magnet/upload', params.toString(), {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       });
 
       const data = response.data;
@@ -96,28 +98,37 @@ export class AllDebridService {
     this.ensureKey();
 
     try {
-      const response = await this.client.get('/v4/magnet/status', {
-        params: {
-          apikey: this.apikey,
-          id,
-        },
+      const params = new URLSearchParams();
+      params.append('id', String(id));
+
+      const response = await this.client.post('/v4.1/magnet/status', params.toString(), {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       });
 
       const data = response.data;
       if (data?.status === 'success') {
-        const magnet = data.data?.magnets || data.data?.magnet;
-        const magnetData = Array.isArray(magnet) ? magnet[0] : magnet;
-        const statusCode = magnetData?.statusCode;
-
-        // status codes: 0=queued, 1=downloading, 2=compressing, 3=uploading, 4=ready, 5+=error
-        const ready = statusCode === 4;
-
-        return {
-          ready,
-          status: magnetData?.status,
-          fileName: magnetData?.filename,
-          fileSize: magnetData?.size,
-        };
+        const magnet = data.data?.magnet;
+        if (magnet) {
+          const statusCode = magnet.statusCode;
+          const ready = statusCode === 4;
+          return {
+            ready,
+            status: magnet.status,
+            fileName: magnet.filename,
+            fileSize: magnet.size,
+          };
+        }
+        if (data.data?.magnets?.length > 0) {
+          const magnet = data.data.magnets[0];
+          const statusCode = magnet.statusCode;
+          const ready = statusCode === 4;
+          return {
+            ready,
+            status: magnet.status,
+            fileName: magnet.filename,
+            fileSize: magnet.size,
+          };
+        }
       }
 
       return { ready: false, error: data?.error?.message };
@@ -130,52 +141,44 @@ export class AllDebridService {
     this.ensureKey();
 
     try {
-      // Files are embedded in magnet/status, not a separate endpoint
-      const response = await this.client.get('/v4/magnet/status', {
-        params: {
-          apikey: this.apikey,
-          id,
-        },
+      const params = new URLSearchParams();
+      params.append('id', String(id));
+
+      const response = await this.client.post('/v4/magnet/files', params.toString(), {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       });
 
       const data = response.data;
       const debugPath = require('path').join(require('os').tmpdir(), 'nyaa-debug.json');
       require('fs').writeFileSync(debugPath, JSON.stringify(data, null, 2));
-      console.log('[AllDebrid] status debug written to:', debugPath);
-      if (data?.status === 'success') {
-        const magnetData = data.data?.magnets || data.data?.magnet;
-        const magnet = Array.isArray(magnetData) ? magnetData[0] : magnetData;
+      console.log('[AllDebrid] files debug written to:', debugPath);
 
-        // Files could be at:
-        // 1. magnet.files[] (flat array in magnet object)
-        // 2. magnet.links[].files[]
-        // 3. magnet.links[] where each link is a direct file
-        const files = magnet?.files || [];
-        const links = magnet?.links || [];
-        console.log('[AllDebrid] magnet.files:', files.length, 'magnet.links:', links.length);
-
-        let allFiles: Array<{ path: string; size: number; id: number }> = [];
-
-        // Try magnet.files first
-        if (files.length > 0) {
-          allFiles = files.map((f: any) => ({
-            path: f?.n || f?.filename || f?.path || '',
-            size: f?.size || 0,
-            id: f?.id || 0,
-          }));
+      if (data?.status === 'success' && data?.data?.magnets) {
+        const magnetEntry = data.data.magnets.find((m: any) => m.id === id);
+        if (magnetEntry?.files) {
+          const files: Array<{ path: string; size: number; id: number }> = [];
+          const flattenFiles = (nodes: any[], prefix = ''): Array<{ path: string; size: number; id: number }> => {
+            return nodes.reduce<Array<{ path: string; size: number; id: number }>>((acc, node, idx) => {
+              const name = node.n || '';
+              const fullPath = prefix ? `${prefix}/${name}` : name;
+              if (node.e && Array.isArray(node.e)) {
+                // It's a folder, recurse
+                acc.push(...flattenFiles(node.e, fullPath));
+              } else if (node.l) {
+                // It's a file with a link
+                files.push({
+                  path: fullPath,
+                  size: node.s || 0,
+                  id: idx + 1,
+                  link: node.l,
+                } as any);
+              }
+              return acc;
+            }, []);
+          };
+          flattenFiles(magnetEntry.files);
+          return files;
         }
-
-        // Fallback: extract from links
-        if (allFiles.length === 0 && links.length > 0) {
-          allFiles = links.map((link: any, idx: number) => ({
-            path: link?.filename || `file-${idx + 1}`,
-            size: link?.size || 0,
-            id: idx + 1,
-          }));
-        }
-
-        console.log('[AllDebrid total files]', allFiles.length);
-        return allFiles;
       }
 
       return [];
@@ -185,83 +188,35 @@ export class AllDebridService {
     }
   }
 
-  async unlockFile(id: number): Promise<{ success: boolean; link?: string; error?: string }> {
+  async unlockFile(fileLink: string): Promise<{ success: boolean; link?: string; error?: string }> {
     this.ensureKey();
 
     try {
-      const response = await this.client.get('/v4/magnet/files', {
-        params: {
-          apikey: this.apikey,
-          id,
-        },
-      });
+      const params = new URLSearchParams();
+      params.append('link', fileLink);
 
-      // The files endpoint returns the download links directly in most cases
-      // If not, we use the unlock endpoint
-      const data = response.data;
-      if (data?.status === 'success') {
-        const magnetData = data.data?.magnet || data.data?.magnets;
-        if (magnetData?.files) {
-          const targetFile = magnetData.files.find(
-            (f: any) => f.id === id && (f.link || f.download_link)
-          );
-          if (targetFile) {
-            return {
-              success: true,
-              link: targetFile.link || targetFile.download_link,
-            };
-          }
-        }
-      }
-
-      // Fallback to the generic unlock approach
-      // AllDebrid returns files with download links when torrent is ready
-      // We need the actual link from the file entry
-      return {
-        success: false,
-        error: 'File link not available. Make sure the torrent is fully ready.',
-      };
-    } catch (e: any) {
-      return {
-        success: false,
-        error: e.response?.data?.error?.message || e.message,
-      };
-    }
-  }
-
-  /**
-   * Unlock a specific file from a ready torrent by file ID
-   * Uses the /v4/link/unlock pattern where id references the file within the magnet
-   */
-  async unlockFileById(linkId: number): Promise<{ success: boolean; link?: string; error?: string }> {
-    this.ensureKey();
-
-    try {
-      const response = await this.client.get('/v4/link/unlock', {
-        params: {
-          apikey: this.apikey,
-          id: linkId,
-          remote: 1, // Get remote URL for streaming
-        },
+      const response = await this.client.post('/v4/link/unlock', params.toString(), {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       });
 
       const data = response.data;
       if (data?.status === 'success' && data?.data?.link) {
-        return { success: true, link: data.data.link };
+        return {
+          success: true,
+          link: data.data.link,
+        };
+      }
+
+      if (data?.status === 'success' && data?.data?.delayed) {
+        return { success: false, error: 'File is still processing, please try again shortly' };
       }
 
       return { success: false, error: data?.error?.message || 'Unlock failed' };
     } catch (e: any) {
-      return {
-        success: false,
-        error: e.response?.data?.error?.message || e.message,
-      };
+      return { success: false, error: e.response?.data?.error?.message || e.message };
     }
   }
 
-  /**
-   * Get files with download links for a ready torrent
-   */
   async getFilesWithLinks(id: number): Promise<Array<{
     path: string;
     size: number;
@@ -271,25 +226,31 @@ export class AllDebridService {
     this.ensureKey();
 
     try {
-      const response = await this.client.get('/v4/magnet/files', {
-        params: {
-          apikey: this.apikey,
-          id,
-        },
+      const params = new URLSearchParams();
+      params.append('id', String(id));
+
+      const response = await this.client.post('/v4/magnet/files', params.toString(), {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       });
 
       const data = response.data;
-      if (data?.status === 'success') {
-        const magnetData = data.data?.magnets || data.data?.magnet;
-        const magnet = Array.isArray(magnetData) ? magnetData[0] : magnetData;
-
-        if (magnet?.files) {
-          return magnet.files.map((f: any) => ({
-            path: f.filename || f.path || '',
-            size: f.size || 0,
-            id: f.id,
-            link: f.link || f.download_link,
-          }));
+      if (data?.status === 'success' && data?.data?.magnets) {
+        const magnetEntry = data.data.magnets.find((m: any) => m.id === id);
+        if (magnetEntry?.files) {
+          const files: Array<{ path: string; size: number; id: number; link?: string }> = [];
+          const flattenFiles = (nodes: any[], prefix = '') => {
+            nodes.forEach((node, idx) => {
+              const name = node.n || '';
+              const fullPath = prefix ? `${prefix}/${name}` : name;
+              if (node.e && Array.isArray(node.e)) {
+                flattenFiles(node.e, fullPath);
+              } else if (node.l) {
+                files.push({ path: fullPath, size: node.s || 0, id: idx + 1, link: node.l });
+              }
+            });
+          };
+          flattenFiles(magnetEntry.files);
+          return files;
         }
       }
 
