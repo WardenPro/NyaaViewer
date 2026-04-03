@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build && electron-builder",
-    "build:win": "tsc && vite build && electron-builder --win",
-    "build:mac": "tsc && vite build && electron-builder --mac",
+    "build:win": "tsc && vite build && electron-builder --win --publish never",
+    "build:mac": "tsc && vite build && electron-builder --mac --publish never",
     "build:linux": "tsc && vite build && electron-builder --linux --publish never",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
