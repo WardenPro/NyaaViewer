@@ -65,14 +65,11 @@ export class AllDebridService {
         const magnet = data.data.magnets[0];
         console.log('[AllDebrid upload response]', JSON.stringify({
           id: magnet.id,
-          statusCode: magnet.statusCode,
-          statusString: magnet.status,
+          ready: magnet.ready,
         }, null, 2));
         return {
           id: magnet.id,
-          ready: magnet.statusCode === 3,
-          statusCode: magnet.statusCode,
-          status: magnet.status,
+          ready: magnet.ready === true,
         };
       }
 
@@ -105,8 +102,8 @@ export class AllDebridService {
         const magnetData = Array.isArray(magnet) ? magnet[0] : magnet;
         const statusCode = magnetData?.statusCode;
 
-        // status codes: 0 = queued, 1 = downloading, 2 = processing, 3 = ready, 4 = error, 5 = dead
-        const ready = statusCode === 3;
+        // status codes: 0=queued, 1=downloading, 2=compressing, 3=uploading, 4=ready, 5+=error
+        const ready = statusCode === 4;
 
         return {
           ready,

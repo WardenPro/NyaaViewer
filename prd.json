@@ -1,0 +1,71 @@
+{
+  "version": "1.2",
+  "stories": [
+    {
+      "id": "US-001",
+      "title": "Scaffolding Electron + Vite + React + TypeScript",
+      "priority": 1,
+      "passes": true
+    },
+    {
+      "id": "US-002",
+      "title": "AllDebrid API client + Settings page",
+      "priority": 2,
+      "passes": true
+    },
+    {
+      "id": "US-003",
+      "title": "Store + State management",
+      "priority": 3,
+      "passes": true
+    },
+    {
+      "id": "US-004",
+      "title": "nyaa.si search + results UI",
+      "priority": 4,
+      "passes": true
+    },
+    {
+      "id": "US-005",
+      "title": "Home page with trending + resume watch sections",
+      "priority": 5,
+      "passes": true
+    },
+    {
+      "id": "US-006",
+      "title": "mpv player integration + streaming flow",
+      "priority": 6,
+      "passes": true
+    },
+    {
+      "id": "US-007",
+      "title": "MKV subtitle track detection + selector UI",
+      "priority": 7,
+      "passes": true
+    },
+    {
+      "id": "US-008",
+      "title": "Packaging configuration: Windows NSIS + Mac DMG",
+      "priority": 8,
+      "passes": true
+    },
+    {
+      "id": "US-009",
+      "title": "MKV subtitle extraction service via mediainfo",
+      "priority": 9,
+      "passes": true
+    },
+    {
+      "id": "US-010",
+      "title": "Wire up real mpv playback in PlayerPage",
+      "priority": 10,
+      "passes": true
+    },
+    {
+      "id": "US-011",
+      "title": "Native binary download/bundling for mpv and mediainfo",
+      "priority": 11,
+      "passes": true
+    }
+  ]
+}
