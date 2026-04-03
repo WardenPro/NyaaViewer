@@ -28,6 +28,7 @@ export default function PlayerPage() {
 
   const torrentFromState = location.state?.torrent as Partial<{ title: string; infohash: string; magnetUri: string }> | undefined;
   const torrent = torrentFromState || player.currentTorrent;
+
   const setPlayerState = useAppStore((s) => s.setPlayerState);
   const resetPlayerState = useAppStore((s) => s.resetPlayerState);
 
@@ -52,6 +53,13 @@ export default function PlayerPage() {
       window.electronAPI.hideVideoWindow();
     };
   }, []);
+
+  // Start torrent flow on mount when we have a torrent and haven't loaded yet
+  useEffect(() => {
+    if (torrent && !isLoading && torrentFiles.length === 0 && !player.isPlaying) {
+      startTorrentFlow(torrent);
+    }
+  }, [torrent?.infohash]);
 
   // Reposition video window on resize
   useEffect(() => {
