@@ -10,6 +10,7 @@ export class MpvService {
   private ipcSocket: net.Socket | null = null;
   private ipcPath: string = '';
   private isPlaying = false;
+  private mpvExitError: string | null = null;
   private onPositionUpdate: ((data: { position: number; duration: number }) => void) | null = null;
   private positionInterval: NodeJS.Timeout | null = null;
 
@@ -68,22 +69,39 @@ export class MpvService {
         },
       });
 
+      const stderrChunks: string[] = [];
+      this.mpvProcess.stderr?.on('data', (chunk) => {
+        const msg = chunk.toString();
+        stderrChunks.push(msg);
+        console.error('[mpv stderr]:', msg.trim());
+      });
+
       this.mpvProcess.on('error', (err) => {
         console.error('mpv process error:', err);
         this.isPlaying = false;
       });
 
       this.mpvProcess.on('exit', (code, signal) => {
-        console.log(`[mpv] exited with code ${code}, signal ${signal}`);
+        const stderr = stderrChunks.join('').trim();
+        console.error(`[mpv] exited with code ${code}, signal ${signal}. stderr: ${stderr}`);
+        if (code !== 0 && code !== null) {
+          this.mpvExitError = stderr || `mpv exited with code ${code} (no display available or invalid arguments)`;
+        }
         this.isPlaying = false;
         this.cleanupPositionInterval();
       });
 
       // Wait for socket to be available
-      await this.waitForSocket(5000);
+      await this.waitForSocket(10000);
 
       // Connect to the IPC socket
       await this.connectIpc();
+
+      // Check if mpv already exited (e.g., no display)
+      if (!this.isPlaying && this.mpvExitError) {
+        await this.cleanup();
+        return { success: false, error: this.mpvExitError };
+      }
 
       this.isPlaying = true;
       this.startPositionPolling();
@@ -123,6 +141,10 @@ export class MpvService {
     } catch (e) {
       console.error('Failed to seek mpv:', e);
     }
+  }
+
+  private async cleanup(): Promise<void> {
+    await this.stop();
   }
 
   async stop(): Promise<void> {
