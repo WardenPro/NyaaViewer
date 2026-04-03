@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import useAppStore from '../store/appStore';
 import SubtitleSelector from '../components/SubtitleSelector';
@@ -29,7 +29,6 @@ export default function PlayerPage() {
   const player = useAppStore((s) => s.player);
   const setPlayerState = useAppStore((s) => s.setPlayerState);
   const resetPlayerState = useAppStore((s) => s.resetPlayerState);
-  const preferredLang = useAppStore((s) => s.preferredSubtitleLang);
 
   const [isLoading, setIsLoading] = useState(false);
   const [torrentStatus, setTorrentStatus] = useState('');
@@ -42,12 +41,41 @@ export default function PlayerPage() {
   const [showDebug, setShowDebug] = useState(false);
   const [debugContent, setDebugContent] = useState('');
 
-  // Auto-start the torrent-to-playback flow
+  const videoAreaRef = useRef<HTMLDivElement>(null);
+
+  // Setup video window on mount
   useEffect(() => {
-    if (torrent) {
-      startTorrentFlow(torrent);
-    }
+    window.electronAPI.setupVideoWindow();
+    return () => {
+      window.electronAPI.stopPlayback();
+      window.electronAPI.hideVideoWindow();
+    };
   }, []);
+
+  // Reposition video window on resize
+  useEffect(() => {
+    if (!player.isPlaying) return;
+
+    const reposition = () => {
+      if (videoAreaRef.current) {
+        const rect = videoAreaRef.current.getBoundingClientRect();
+        window.electronAPI.showVideoWindow({
+          x: rect.left,
+          y: rect.top,
+          width: rect.width,
+          height: rect.height,
+        });
+      }
+    };
+
+    const observer = new ResizeObserver(reposition);
+    if (videoAreaRef.current) {
+      observer.observe(videoAreaRef.current);
+    }
+
+    reposition();
+    return () => observer.disconnect();
+  }, [player.isPlaying]);
 
   // Position update listener from main process
   useEffect(() => {
@@ -58,7 +86,7 @@ export default function PlayerPage() {
       });
 
       if (player.currentTorrent) {
-        window.electronAPI.updateWatchPosition(player.currentTorrent.infohash, data.position);
+        window.electronAPI.updateWatchPosition(player.currentTorrent.infohash, data.position, data.duration);
       }
     };
 
@@ -73,18 +101,12 @@ export default function PlayerPage() {
         window.electronAPI.updateWatchPosition(
           player.currentTorrent.infohash,
           player.currentPosition,
+          player.duration,
         );
       }
     }, 30000);
     return () => clearInterval(interval);
-  }, [player.isPlaying, player.currentTorrent, player.currentPosition]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      window.electronAPI.stopPlayback();
-    };
-  }, []);
+  }, [player.isPlaying, player.currentTorrent, player.currentPosition, player.duration]);
 
   const startTorrentFlow = useCallback(async (torrentData: typeof torrent) => {
     if (!torrentData) return;
@@ -107,8 +129,6 @@ export default function PlayerPage() {
       const uploadResult = await window.electronAPI.uploadMagnet(torrentData.magnetUri);
       const magnetData = uploadResult as { id?: number; ready?: boolean; status?: string; error?: string };
 
-      console.log('[uploadMagnet result]', JSON.stringify(magnetData, null, 2));
-
       if (!magnetData.id) {
         setError(`Failed to upload magnet: ${magnetData.error || 'Unknown error'}`);
         setIsLoading(false);
@@ -123,10 +143,8 @@ export default function PlayerPage() {
       } else {
         setTorrentStatus('Waiting for AllDebrid to download torrent...');
 
-        let attempts = 0;
-        const maxAttempts = 120; // 10 min at 5s intervals
-
-        while (attempts < maxAttempts) {
+        let attempts = 1;
+        while (attempts <= 120) {
           await new Promise((r) => setTimeout(r, 5000));
           const status = await window.electronAPI.getTorrentStatus(torrentId) as { ready?: boolean; status?: string };
 
@@ -135,17 +153,15 @@ export default function PlayerPage() {
             break;
           }
 
-          setTorrentStatus(`AllDebrid status: ${status?.status || 'processing...'} (${(attempts + 1) * 5}s)`);
-          setPollProgress(((attempts + 1) / maxAttempts) * 100);
+          setTorrentStatus(`AllDebrid status: ${status?.status || 'processing...'} (${attempts * 5}s)`);
+          setPollProgress((attempts / 120) * 100);
           attempts++;
         }
       }
 
       setTorrentStatus('Fetching file list...');
-      console.log('[PlayerPage] Fetching files for torrentId:', torrentId);
       const filesResult = await window.electronAPI.getTorrentFiles(torrentId);
       const fileList = Array.isArray(filesResult) ? (filesResult as TorrentFile[]) : [];
-      console.log('[PlayerPage] getTorrentFiles returned:', JSON.stringify(fileList, null, 2));
 
       setTorrentFiles(fileList);
 
@@ -156,19 +172,15 @@ export default function PlayerPage() {
         })
         .sort((a, b) => (b.size || 0) - (a.size || 0));
 
-      console.log('[PlayerPage] Filtered video files:', videoFiles.length);
-
       if (videoFiles.length > 1) {
-        // Multiple video files - let user choose
         setTorrentStatus('Select a file to watch');
         setIsLoading(false);
         return;
       }
 
       if (videoFiles.length === 0) {
-        // Show ALL files for debugging
         const fileSummary = fileList.length > 0
-          ? JSON.stringify(fileList, null, 2)
+          ? JSON.stringify(fileList.slice(0, 5), null, 2)
           : 'EMPTY - AllDebrid returned no files at all';
         setError(`No video files found in this torrent.\n\nFiles: ${fileSummary}`);
         setIsLoading(false);
@@ -206,16 +218,17 @@ export default function PlayerPage() {
 
       setTorrentStatus('Starting playback...');
 
-      await window.electronAPI.startPlayback(unlockData.link);
+      const result = await window.electronAPI.startPlayback(unlockData.link);
+      if (!result?.success) {
+        setError(`Failed to start playback: ${result?.error || 'Unknown error'}`);
+        setIsLoading(false);
+        return;
+      }
+
       setPlayerState({
         isPlaying: true,
         currentTorrent: torrent as any,
       });
-
-      // Try to extract subtitle tracks
-      // For remote URLs, mpv handles subtitle detection via --slang
-      // We set the preferred language
-      await window.electronAPI.setSubtitleTrack('auto');
 
       setError('');
       setIsLoading(false);
@@ -262,7 +275,6 @@ export default function PlayerPage() {
         <div className="w-80 text-center space-y-3">
           <p className="text-dark-textMuted">{torrentStatus}</p>
 
-          {/* Progress bar for polling */}
           {pollProgress > 0 && pollProgress < 100 && (
             <div className="space-y-1">
               <div className="w-full bg-dark-border rounded-full h-2">
@@ -359,7 +371,6 @@ export default function PlayerPage() {
             </button>
           ))}
 
-          {/* Show non-video files as info */}
           {torrentFiles.filter((f) => {
             const ext = '.' + (f.path?.split('.').pop() || '').toLowerCase();
             return !VIDEO_EXTS.includes(ext);
@@ -384,7 +395,7 @@ export default function PlayerPage() {
     );
   }
 
-  // Active playback
+  // Active playback - mpv embedded in app
   if (player.isPlaying) {
     return (
       <div className="h-full flex flex-col">
@@ -406,26 +417,23 @@ export default function PlayerPage() {
           </div>
         </div>
 
-        {/* Main area: video placeholder + side panel */}
+        {/* Main area: mpv video + side panel */}
         <div className="flex-1 flex overflow-hidden">
-          {/* Video area */}
+          {/* Video area - mpv renders here via HWND */}
           <div className="flex-1 flex flex-col">
-            <div className="flex-1 bg-black flex items-center justify-center relative">
-              <div className="text-center text-dark-textMuted">
-                <p className="text-lg">mpv is handling video playback in a separate window</p>
-                <p className="text-sm mt-1">
-                  Controls above | Progress below
-                </p>
-              </div>
-            </div>
+            <div
+              ref={videoAreaRef}
+              className="flex-1 bg-black relative"
+            />
 
             {/* Seek bar */}
-            {player.duration > 0 && (
+            {player.duration > 0 && player.duration < Infinity && (
               <div className="px-6 py-3 bg-dark-card border-t border-dark-border">
                 <input
                   type="range"
                   min={0}
                   max={player.duration}
+                  step={0.1}
                   value={player.currentPosition}
                   onChange={(e) => handleSeek(Number(e.target.value))}
                   className="w-full accent-primary h-2 cursor-pointer"
@@ -452,26 +460,8 @@ export default function PlayerPage() {
                 onSelect={handleSubtitleChange}
               />
               <p className="text-xs text-dark-textMuted mt-2">
-                Subtitle detection requires mediainfo CLI installed on your system.
+                External subtitle files (.srt, .ass) can be opened through mpv context menu.
               </p>
-            </div>
-
-            {/* Quick language toggle for mpv --slang */}
-            <div className="card space-y-2">
-              <p className="text-sm font-semibold">Quick Subtitle Language</p>
-              {['en', 'fr', 'ja', 'und'].map((lang) => (
-                <button
-                  key={lang}
-                  onClick={() => window.electronAPI.setSubtitleTrack(lang === 'und' ? 'auto' : lang)}
-                  className={`w-full text-left px-3 py-1.5 rounded text-sm transition-colors ${
-                    preferredLang === lang
-                      ? 'bg-primary/20 text-primary'
-                      : 'text-dark-textMuted hover:text-white'
-                  }`}
-                >
-                  {lang === 'en' ? 'English' : lang === 'fr' ? 'French' : lang === 'ja' ? 'Japanese' : 'Auto'}
-                </button>
-              ))}
             </div>
 
             {/* Torrent info */}
@@ -504,6 +494,7 @@ export default function PlayerPage() {
 }
 
 function formatTime(seconds: number): string {
+  if (!seconds || isNaN(seconds) || !isFinite(seconds)) return '0:00';
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = Math.floor(seconds % 60);

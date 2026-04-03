@@ -25,6 +25,12 @@ const api = {
     ipcRenderer.invoke('get-alldebrid-key'),
 
   // Player
+  setupVideoWindow: () =>
+    ipcRenderer.invoke('setup-video-window'),
+  showVideoWindow: (bounds: { x: number; y: number; width: number; height: number }) =>
+    ipcRenderer.invoke('show-video-window', bounds),
+  hideVideoWindow: () =>
+    ipcRenderer.invoke('hide-video-window'),
   startPlayback: (url: string) =>
     ipcRenderer.invoke('start-playback', url),
   pausePlayback: () =>
@@ -47,8 +53,8 @@ const api = {
     ipcRenderer.invoke('get-watch-history'),
   addWatchEntry: (entry: unknown) =>
     ipcRenderer.invoke('add-watch-entry', entry),
-  updateWatchPosition: (infohash: string, position: number) =>
-    ipcRenderer.invoke('update-watch-position', infohash, position),
+  updateWatchPosition: (infohash: string, position: number, duration: number) =>
+    ipcRenderer.invoke('update-watch-position', infohash, position, duration),
   removeWatchEntry: (infohash: string) =>
     ipcRenderer.invoke('remove-watch-entry', infohash),
 
@@ -76,6 +82,9 @@ export interface ElectronAPI {
   unlockLink: (fileLink: string) => Promise<{ success: boolean; link?: string; error?: string }>;
   setAllDebridKey: (apiKey: string) => Promise<void>;
   getAllDebridKey: () => Promise<string | null>;
+  setupVideoWindow: () => Promise<{ success: boolean; error?: string }>;
+  showVideoWindow: (bounds: { x: number; y: number; width: number; height: number }) => Promise<number | null>;
+  hideVideoWindow: () => Promise<void>;
   startPlayback: (url: string) => Promise<{ success: boolean; error?: string }>;
   pausePlayback: () => Promise<void>;
   seekPlayback: (position: number) => Promise<void>;
@@ -87,7 +96,7 @@ export interface ElectronAPI {
   onUploadMagnetDebug: (callback: (data: string) => void) => void;
   getWatchHistory: () => Promise<unknown[]>;
   addWatchEntry: (entry: unknown) => Promise<void>;
-  updateWatchPosition: (infohash: string, position: number) => Promise<void>;
+  updateWatchPosition: (infohash: string, position: number, duration: number) => Promise<void>;
   removeWatchEntry: (infohash: string) => Promise<void>;
 
   // Auto-update

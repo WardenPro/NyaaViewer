@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron';
 import { mpvService } from '../services/mpv';
+import { videoWindow } from '../services/video-window';
 import { extractSubtitleTracks } from '../services/subtitles';
 import { getMainWindow } from '../main';
 
@@ -13,8 +14,13 @@ export function registerPlayerHandlers(): void {
   });
 
   ipcMain.handle('start-playback', async (_event, url: string) => {
-    const win = getMainWindow();
-    return mpvService.startPlayback(url, win);
+    try {
+      const hwnd = videoWindow.getHwnd();
+      const result = await mpvService.startPlayback(url, hwnd || undefined);
+      return result;
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
   });
 
   ipcMain.handle('pause-playback', async () => {
@@ -27,6 +33,27 @@ export function registerPlayerHandlers(): void {
 
   ipcMain.handle('stop-playback', async () => {
     await mpvService.stop();
+    videoWindow.hide();
+  });
+
+  ipcMain.handle('setup-video-window', async () => {
+    const win = getMainWindow();
+    if (!win || win.isDestroyed()) {
+      return { success: false, error: 'No main window' };
+    }
+    if (!videoWindow.exists()) {
+      videoWindow.create(win);
+    }
+    return { success: true };
+  });
+
+  ipcMain.handle('show-video-window', async (_event, bounds: { x: number; y: number; width: number; height: number }) => {
+    videoWindow.show(bounds);
+    return videoWindow.getHwnd();
+  });
+
+  ipcMain.handle('hide-video-window', async () => {
+    videoWindow.hide();
   });
 
   ipcMain.handle('get-player-position', async () => {

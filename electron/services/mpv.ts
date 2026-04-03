@@ -4,7 +4,6 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { getMpvPath } from '../utils/binaries';
-import { app, BrowserWindow } from 'electron';
 
 export class MpvService {
   private mpvProcess: ChildProcess | null = null;
@@ -22,14 +21,14 @@ export class MpvService {
   }
 
   /**
-   * Start playback of a URL via mpv
+   * Start playback of a URL via mpv, optionally embedded in a given window (HWND).
    */
-  async startPlayback(url: string, mainWindow: BrowserWindow | null): Promise<{ success: boolean; error?: string }> {
+  async startPlayback(url: string, hwnd?: number): Promise<{ success: boolean; error?: string }> {
     try {
       // Stop any existing instance
       await this.stop();
 
-      // Set up IPC socket path
+      // Set up IPC socket path for mpv communication
       const tmpDir = process.platform === 'win32'
         ? path.join(process.env.TEMP || process.env.USERPROFILE || os.tmpdir(), 'nyaa-viewer')
         : path.join(os.tmpdir(), 'nyaa-viewer');
@@ -54,6 +53,14 @@ export class MpvService {
         '--ytdl=no',
       ];
 
+      // Embed in the given window (HWND) on Windows
+      if (hwnd && hwnd > 0) {
+        args.push(`--wid=${hwnd}`);
+        args.push('--no-border');
+        // Ensure the video content stays within the window
+        args.push('--no-keepaspect');
+      }
+
       this.mpvProcess = spawn(getMpvPath(), args, {
         env: {
           ...process.env,
@@ -66,13 +73,14 @@ export class MpvService {
         this.isPlaying = false;
       });
 
-      this.mpvProcess.on('exit', () => {
+      this.mpvProcess.on('exit', (code, signal) => {
+        console.log(`[mpv] exited with code ${code}, signal ${signal}`);
         this.isPlaying = false;
         this.cleanupPositionInterval();
       });
 
       // Wait for socket to be available
-      await this.waitForSocket(3000);
+      await this.waitForSocket(5000);
 
       // Connect to the IPC socket
       await this.connectIpc();
@@ -162,7 +170,7 @@ export class MpvService {
     if (!this.ipcSocket) return;
 
     try {
-      if (trackId === '' || trackId === -1) {
+      if (trackId === '' || trackId === -1 || trackId === 'no') {
         await this.sendMpvCommand({ command: ['set', 'sid', 'no'] });
       } else {
         await this.sendMpvCommand({ command: ['set', 'sid', String(trackId)] });
