@@ -109,23 +109,29 @@ export default function PlayerPage() {
       }
 
       const torrentId = magnetData.id;
-      setTorrentStatus('Waiting for AllDebrid to download torrent...');
 
-      // Poll for ready status
-      let attempts = 0;
-      const maxAttempts = 120; // 10 min at 5s intervals
+      // Check immediately — cached torrents are already ready
+      const initialStatus = await window.electronAPI.getTorrentStatus(torrentId) as { ready?: boolean; status?: string };
+      if (initialStatus?.ready) {
+        // Skip polling, go straight to file list
+      } else {
+        setTorrentStatus('Waiting for AllDebrid to download torrent...');
 
-      while (attempts < maxAttempts) {
-        await new Promise((r) => setTimeout(r, 5000));
-        const status = await window.electronAPI.getTorrentStatus(torrentId) as { ready?: boolean; status?: string };
+        let attempts = 0;
+        const maxAttempts = 120; // 10 min at 5s intervals
 
-        if (status?.ready) {
-          break;
+        while (attempts < maxAttempts) {
+          await new Promise((r) => setTimeout(r, 5000));
+          const status = await window.electronAPI.getTorrentStatus(torrentId) as { ready?: boolean; status?: string };
+
+          if (status?.ready) {
+            break;
+          }
+
+          setTorrentStatus(`AllDebrid status: ${status?.status || 'processing...'} (${(attempts + 1) * 5}s)`);
+          setPollProgress(((attempts + 1) / maxAttempts) * 100);
+          attempts++;
         }
-
-        setTorrentStatus(`AllDebrid status: ${status?.status || 'processing...'} (${attempts * 5}s)`);
-        setPollProgress((attempts / maxAttempts) * 100);
-        attempts++;
       }
 
       setTorrentStatus('Fetching file list...');

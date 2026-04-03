@@ -14,11 +14,51 @@ export default function SettingsPage() {
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [testingKey, setTestingKey] = useState(false);
   const [testError, setTestError] = useState('');
+  const [updateStatus, setUpdateStatus] = useState('');
+  const [updateProgress, setUpdateProgress] = useState(0);
 
   useEffect(() => {
     setApiKeyInput(allDebridApiKey);
     loadSavedApiKey();
   }, []);
+
+  // Auto-update status listener
+  useEffect(() => {
+    if (!window.electronAPI?.onUpdateStatus) return;
+
+    window.electronAPI.onUpdateStatus((data: { type: string; version?: string; percent?: number }) => {
+      switch (data.type) {
+        case 'checking':
+          setUpdateStatus('Checking...');
+          setUpdateProgress(0);
+          break;
+        case 'available':
+          setUpdateStatus(`Downloading v${data.version || '?'}...`);
+          setUpdateProgress(0);
+          break;
+        case 'downloading':
+          setUpdateProgress(Math.round(data.percent || 0));
+          break;
+        case 'downloaded':
+          setUpdateStatus('Update installed, restarting...');
+          setTimeout(() => window.location.reload(), 2000);
+          break;
+        case 'not-available':
+          setUpdateStatus('Already up to date');
+          setUpdateProgress(0);
+          break;
+        case 'error':
+          setUpdateStatus(`Update error`);
+          setUpdateProgress(0);
+          break;
+      }
+    });
+  }, []);
+
+  const handleCheckUpdates = () => {
+    setUpdateStatus('');
+    window.electronAPI.checkForUpdates();
+  };
 
   const loadSavedApiKey = async () => {
     try {
@@ -141,12 +181,28 @@ export default function SettingsPage() {
       </div>
 
       {/* About */}
-      <div className="card space-y-2">
+      <div className="card space-y-3">
         <h3 className="text-lg font-semibold">About</h3>
         <p className="text-sm text-dark-textMuted">NyaaViewer v0.1.0</p>
         <p className="text-xs text-dark-textMuted">
           Search nyaa.si torrents, deborid via AllDebrid, and stream MKV files with subtitles.
         </p>
+        <div className="flex items-center gap-3 pt-2 border-t border-dark-border">
+          <button onClick={handleCheckUpdates} className="btn-secondary text-sm py-1.5 px-4">
+            Check for Updates
+          </button>
+          {updateStatus && (
+            <div className="text-sm text-dark-textMuted">{updateStatus}</div>
+          )}
+          {updateProgress > 0 && updateProgress < 100 && (
+            <div className="flex-1 bg-dark-border rounded-full h-1.5">
+              <div
+                className="bg-primary h-1.5 rounded-full transition-all"
+                style={{ width: `${updateProgress}%` }}
+              />
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

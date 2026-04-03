@@ -51,6 +51,12 @@ const api = {
     ipcRenderer.invoke('update-watch-position', infohash, position),
   removeWatchEntry: (infohash: string) =>
     ipcRenderer.invoke('remove-watch-entry', infohash),
+
+  // Auto-update
+  checkForUpdates: () =>
+    ipcRenderer.invoke('check-for-updates'),
+  onUpdateStatus: (callback: (data: { type: string; version?: string; percent?: number; message?: string }) => void) =>
+    ipcRenderer.on('auto-update:status', (_event, data) => callback(data)),
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);
@@ -78,6 +84,10 @@ export interface ElectronAPI {
   addWatchEntry: (entry: unknown) => Promise<void>;
   updateWatchPosition: (infohash: string, position: number) => Promise<void>;
   removeWatchEntry: (infohash: string) => Promise<void>;
+
+  // Auto-update
+  checkForUpdates: () => Promise<{ checking?: boolean; error?: string }>;
+  onUpdateStatus: (callback: (data: { type: string; version?: string; percent?: number; message?: string }) => void) => void;
 }
 
 declare global {

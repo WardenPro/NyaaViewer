@@ -13,11 +13,18 @@ win:
 mac:
   target:
     - dmg
+    - zip
   icon: assets/icon.icns
   category: public.app-category.entertainment
 linux:
   target:
     - AppImage
+  category: Utility
+publish:
+  provider: github
+  owner: WardenPro
+  repo: NyaaViewer
+  releaseType: release
 nsis:
   oneClick: false
   perMachine: true

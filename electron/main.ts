@@ -10,6 +10,73 @@ import { registerAllDebridHandlers } from './ipc/alldebrid';
 import { registerPlayerHandlers } from './ipc/player';
 import { registerStorageHandlers } from './utils/storage';
 
+// Auto-updater (only available in production builds)
+let autoUpdater: import('electron-updater').AppUpdater | null = null;
+
+function setupAutoUpdater() {
+  if (app.isPackaged) {
+    try {
+      const { autoUpdater: updater } = require('electron-updater');
+      autoUpdater = updater;
+      autoUpdater.autoDownload = true;
+      autoUpdater.autoInstallOnAppQuit = true;
+      autoUpdater.allowPrerelease = false;
+
+      autoUpdater.on('checking-for-update', () => {
+        mainWindow?.webContents.send('auto-update:status', { type: 'checking' });
+      });
+
+      autoUpdater.on('update-available', (info) => {
+        mainWindow?.webContents.send('auto-update:status', {
+          type: 'available',
+          version: info.version,
+        });
+      });
+
+      autoUpdater.on('update-not-available', () => {
+        mainWindow?.webContents.send('auto-update:status', { type: 'not-available' });
+      });
+
+      autoUpdater.on('download-progress', (progressObj) => {
+        mainWindow?.webContents.send('auto-update:status', {
+          type: 'downloading',
+          percent: progressObj.percent,
+        });
+      });
+
+      autoUpdater.on('update-downloaded', () => {
+        mainWindow?.webContents.send('auto-update:status', { type: 'downloaded' });
+        // Auto-install and restart after short delay
+        setTimeout(() => {
+          autoUpdater?.quitAndInstall(false, true);
+        }, 2000);
+      });
+
+      autoUpdater.on('error', (err) => {
+        mainWindow?.webContents.send('auto-update:status', {
+          type: 'error',
+          message: err.message,
+        });
+      });
+    } catch {
+      console.warn('electron-updater not available, skipping auto-update setup');
+    }
+  }
+
+  // IPC handler for manual check
+  ipcMain.handle('check-for-updates', () => {
+    if (autoUpdater && !app.isPackaged) {
+      // In dev, electron-updater is not installed
+      return { error: 'Update checks only work in production builds' };
+    }
+    if (autoUpdater) {
+      autoUpdater.checkForUpdates();
+      return { checking: true };
+    }
+    return { error: 'Auto-updater not initialized' };
+  });
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -45,8 +112,14 @@ app.whenReady().then(async () => {
   registerAllDebridHandlers();
   registerPlayerHandlers();
   registerStorageHandlers();
+  setupAutoUpdater();
 
   createWindow();
+
+  // Auto-check for updates on startup (production only)
+  if (autoUpdater && app.isPackaged) {
+    setTimeout(() => autoUpdater!.checkForUpdates(), 2000);
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
