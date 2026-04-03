@@ -13,6 +13,7 @@ export class MpvService {
   private mpvExitError: string | null = null;
   private onPositionUpdate: ((data: { position: number; duration: number }) => void) | null = null;
   private positionInterval: NodeJS.Timeout | null = null;
+  private windowsPipeName: string = '';
 
   /**
    * Set up a callback for position updates
@@ -29,16 +30,20 @@ export class MpvService {
       // Stop any existing instance
       await this.stop();
 
-      // Set up IPC socket path for mpv communication
-      const tmpDir = process.platform === 'win32'
-        ? path.join(process.env.TEMP || process.env.USERPROFILE || os.tmpdir(), 'nyaa-viewer')
-        : path.join(os.tmpdir(), 'nyaa-viewer');
-
-      if (!fs.existsSync(tmpDir)) {
-        fs.mkdirSync(tmpDir, { recursive: true });
+      // Set up IPC: use named pipes on Windows, Unix sockets elsewhere
+      this.windowsPipeName = '';
+      if (process.platform === 'win32') {
+        this.windowsPipeName = `\\\\.\\pipe\\mpv-ipc-${Date.now()}`;
+        this.ipcPath = this.windowsPipeName;
+        console.log(`[mpv] Using Windows named pipe: ${this.ipcPath}`);
+      } else {
+        const tmpDir = path.join(os.tmpdir(), 'nyaa-viewer');
+        if (!fs.existsSync(tmpDir)) {
+          fs.mkdirSync(tmpDir, { recursive: true });
+        }
+        this.ipcPath = path.join(tmpDir, `mpv-ipc-${Date.now()}.sock`);
+        console.log(`[mpv] Using Unix socket: ${this.ipcPath}`);
       }
-
-      this.ipcPath = path.join(tmpDir, `mpv-ipc-${Date.now()}.sock`);
 
       // Build mpv arguments
       const args = [
@@ -62,14 +67,23 @@ export class MpvService {
         // Disable hwdec when embedding in transparent Electron window
         // GPU compositing conflicts with HWND embedding on Windows
         args.push('--hwdec=no');
+        // Force software renderer to avoid GPU conflicts
+        args.push('--vo=gpu-next');
       } else {
         args.push('--hwdec=auto');
       }
 
-      this.mpvProcess = spawn(getMpvPath(), args, {
+      const mpvPath = getMpvPath();
+      console.log(`[mpv] Spawning: ${mpvPath}`);
+      console.log(`[mpv] Args: ${args.join(' ')}`);
+      console.log(`[mpv] HWND: ${hwnd || 'none (window mode)'}`);
+
+      this.mpvProcess = spawn(mpvPath, args, {
         env: {
           ...process.env,
-          MPV_HOME: tmpDir,
+          MPV_HOME: process.platform === 'win32'
+            ? process.env.TEMP || process.env.USERPROFILE || os.tmpdir()
+            : path.join(os.tmpdir(), 'nyaa-viewer'),
         },
       });
 
@@ -164,8 +178,8 @@ export class MpvService {
       this.ipcSocket = null;
     }
 
-    // Clean up socket file
-    if (this.ipcPath && fs.existsSync(this.ipcPath)) {
+    // Clean up socket file (not needed for Windows named pipes)
+    if (process.platform !== 'win32' && this.ipcPath && fs.existsSync(this.ipcPath)) {
       try {
         fs.unlinkSync(this.ipcPath);
       } catch (_) {}
@@ -240,19 +254,38 @@ export class MpvService {
 
   // Private helpers
 
-  private waitForSocket(timeout = 3000): Promise<void> {
+  private waitForSocket(timeout = 5000): Promise<void> {
     return new Promise((resolve, reject) => {
-      const startTime = Date.now();
-      const check = () => {
-        if (fs.existsSync(this.ipcPath)) {
-          resolve();
-        } else if (Date.now() - startTime > timeout) {
-          reject(new Error('IPC socket timeout'));
-        } else {
-          setTimeout(check, 100);
-        }
-      };
-      check();
+      if (process.platform === 'win32') {
+        // Windows named pipes don't create a filesystem entry.
+        // We poll the pipe for a brief moment to see if it's available.
+        const startTime = Date.now();
+        const check = () => {
+          const sock = net.createConnection(this.ipcPath);
+          sock.on('connect', () => { sock.destroy(); resolve(); });
+          sock.on('error', () => {
+            if (Date.now() - startTime > timeout) {
+              reject(new Error('IPC named pipe not available within timeout'));
+            } else {
+              setTimeout(check, 100);
+            }
+          });
+          sock.setTimeout(500);
+        };
+        check();
+      } else {
+        const startTime = Date.now();
+        const check = () => {
+          if (fs.existsSync(this.ipcPath)) {
+            resolve();
+          } else if (Date.now() - startTime > timeout) {
+            reject(new Error('IPC socket timeout'));
+          } else {
+            setTimeout(check, 100);
+          }
+        };
+        check();
+      }
     });
   }
 
