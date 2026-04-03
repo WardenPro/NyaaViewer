@@ -35,5 +35,17 @@
     "vite": "^6.0.0",
     "vite-plugin-electron": "^0.28.0",
     "vite-plugin-electron-renderer": "^0.14.0"
+  },
+  "build": {
+    "extraFiles": [
+      {
+        "from": "bin/",
+        "to": "Resources/bin",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": "nsis"
+    }
   }
 }
