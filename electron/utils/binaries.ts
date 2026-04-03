@@ -62,7 +62,7 @@ function getUrls(): BinaryConfig {
   if (isWin) {
     return {
       mpv: {
-        downloadUrl: 'https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20241124/mpv-x86_64-20241124-git-5e51475.7z',
+        downloadUrl: 'https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20260403/mpv-x86_64-20260403-git-c41ee4b.7z',
         localPath: path.join(BIN_DIR, 'mpv.7z'),
         executableName: 'mpv.exe',
       },

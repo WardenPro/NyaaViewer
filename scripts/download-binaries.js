@@ -15,7 +15,7 @@ const isMac = process.platform === 'darwin';
 const DOWNLOADS = {
   win32: {
     mpv: {
-      url: 'https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20241124/mpv-x86_64-20241124-git-5e51475.7z',
+      url: 'https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20260403/mpv-x86_64-20260403-git-c41ee4b.7z',
       file: 'mpv.7z',
       extract: ['mpv.exe', 'mplayer.exe'],
     },
