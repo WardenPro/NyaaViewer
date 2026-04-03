@@ -131,12 +131,18 @@ export class AllDebridService {
       });
 
       const data = response.data;
+      console.log('[AllDebrid files response]', JSON.stringify(data, null, 2));
       if (data?.status === 'success') {
-        const files = data.data?.files || [];
-        return files.map((f: any) => ({
-          path: f.filename || f.path || '',
-          size: f.size || 0,
-          id: f.id,
+        const magnetData = data.data?.magnets || data.data?.magnet;
+        const magnet = Array.isArray(magnetData) ? magnetData[0] : magnetData;
+
+        // Files may be at magnet.files or magnetData.links[].files
+        const rawFiles = magnet?.files || [];
+        console.log('[AllDebrid files found]', rawFiles.length);
+        return rawFiles.map((f: any) => ({
+          path: f?.filename || f?.n || f?.path || '',
+          size: f?.size || 0,
+          id: f?.id || 0,
         }));
       }
 

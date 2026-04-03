@@ -156,7 +156,8 @@ export default function PlayerPage() {
       }
 
       if (videoFiles.length === 0) {
-        setError('No video files found in this torrent');
+        console.log('[PlayerPage] All files in torrent:', JSON.stringify(fileList, null, 2));
+        setError(`No video files found in this torrent. Files: ${fileList.map(f => f.path).join(', ') || '(empty)'}`);
         setIsLoading(false);
         return;
       }
