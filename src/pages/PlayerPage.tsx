@@ -24,9 +24,10 @@ interface TorrentFile {
 export default function PlayerPage() {
   const location = useLocation();
   const navigate = useNavigate();
-  const torrent = location.state?.torrent as Partial<{ title: string; infohash: string; magnetUri: string }>;
-
   const player = useAppStore((s) => s.player);
+
+  const torrentFromState = location.state?.torrent as Partial<{ title: string; infohash: string; magnetUri: string }> | undefined;
+  const torrent = torrentFromState || player.currentTorrent;
   const setPlayerState = useAppStore((s) => s.setPlayerState);
   const resetPlayerState = useAppStore((s) => s.resetPlayerState);
 
