@@ -47,7 +47,6 @@ export class MpvService {
         '--really-quiet',
         `--input-ipc-server=${this.ipcPath}`,
         '--keep-open=yes',
-        '--hwdec=auto',
         '--subs-with-matching-audio=yes',
         '--slang=eng,en,fra,fr,und,jpn',
         '--sub-auto=fuzzy',
@@ -60,6 +59,11 @@ export class MpvService {
         args.push('--no-border');
         // Ensure the video content stays within the window
         args.push('--no-keepaspect');
+        // Disable hwdec when embedding in transparent Electron window
+        // GPU compositing conflicts with HWND embedding on Windows
+        args.push('--hwdec=no');
+      } else {
+        args.push('--hwdec=auto');
       }
 
       this.mpvProcess = spawn(getMpvPath(), args, {
