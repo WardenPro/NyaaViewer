@@ -89,9 +89,8 @@ jobs:
           tag_name: v${{ steps.version.outputs.version }}
           name: v${{ steps.version.outputs.version }}
           files: |
-            build-ubuntu-latest/**/*
-            build-windows-latest/**/*
-            build-macos-latest/**/*
+            build-ubuntu-latest/*
+            build-windows-latest/*
+            build-macos-latest/*
           generate_release_notes: true
           make_latest: true
-          draft: false

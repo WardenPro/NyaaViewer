@@ -84,6 +84,7 @@ export interface ElectronAPI {
   setSubtitleTrack: (trackId: string | number) => Promise<void>;
   getSubtitleTracks: (filePath: string) => Promise<unknown[]>;
   onPlayerPositionUpdate: (callback: (data: { position: number; duration: number }) => void) => void;
+  onUploadMagnetDebug: (callback: (data: string) => void) => void;
   getWatchHistory: () => Promise<unknown[]>;
   addWatchEntry: (entry: unknown) => Promise<void>;
   updateWatchPosition: (infohash: string, position: number) => Promise<void>;

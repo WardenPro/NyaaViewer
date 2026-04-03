@@ -49,7 +49,7 @@ export class AllDebridService {
     }
   }
 
-  async uploadMagnet(magnetUri: string): Promise<{ id?: number; ready?: boolean; statusCode?: number; status?: string; error?: string }> {
+  async uploadMagnet(magnetUri: string): Promise<{ id?: number; ready?: boolean; error?: string }> {
     this.ensureKey();
 
     try {
@@ -61,11 +61,18 @@ export class AllDebridService {
       });
 
       const data = response.data;
+
+      // Write debug file
+      const debugPath = require('path').join(require('os').tmpdir(), 'nyaa-debug.json');
+      require('fs').writeFileSync(debugPath, JSON.stringify({ uploadResponse: data, rawData: JSON.stringify(data, null, 2) }, null, 2));
+
       if (data?.status === 'success' && data?.data?.magnets?.length > 0) {
         const magnet = data.data.magnets[0];
-        console.log('[AllDebrid upload response]', JSON.stringify({
+        console.log('[AllDebrid upload]', JSON.stringify({
           id: magnet.id,
           ready: magnet.ready,
+          hash: magnet.hash,
+          keys: Object.keys(magnet),
         }, null, 2));
         return {
           id: magnet.id,
