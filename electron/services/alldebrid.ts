@@ -130,7 +130,8 @@ export class AllDebridService {
     this.ensureKey();
 
     try {
-      const response = await this.client.get('/v4/magnet/files', {
+      // Files are embedded in magnet/status, not a separate endpoint
+      const response = await this.client.get('/v4/magnet/status', {
         params: {
           apikey: this.apikey,
           id,
@@ -140,7 +141,7 @@ export class AllDebridService {
       const data = response.data;
       const debugPath = require('path').join(require('os').tmpdir(), 'nyaa-debug.json');
       require('fs').writeFileSync(debugPath, JSON.stringify(data, null, 2));
-      console.log('[AllDebrid] Debug written to:', debugPath);
+      console.log('[AllDebrid] status debug written to:', debugPath);
       if (data?.status === 'success') {
         const magnetData = data.data?.magnets || data.data?.magnet;
         const magnet = Array.isArray(magnetData) ? magnetData[0] : magnetData;

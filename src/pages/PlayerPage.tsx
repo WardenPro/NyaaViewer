@@ -104,6 +104,8 @@ export default function PlayerPage() {
       const uploadResult = await window.electronAPI.uploadMagnet(torrentData.magnetUri);
       const magnetData = uploadResult as { id?: number; ready?: boolean; status?: string; error?: string };
 
+      console.log('[uploadMagnet result]', JSON.stringify(magnetData, null, 2));
+
       if (!magnetData.id) {
         setError(`Failed to upload magnet: ${magnetData.error || 'Unknown error'}`);
         setIsLoading(false);
