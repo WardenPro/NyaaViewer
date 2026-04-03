@@ -20,7 +20,7 @@ export class VideoWindowService {
     this.videoWindow = new BrowserWindow({
       parent,
       frame: false,
-      transparent: true,
+      backgroundColor: '#000000',
       focusable: false,
       hasShadow: false,
       show: false,

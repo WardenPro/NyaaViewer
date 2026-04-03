@@ -62,13 +62,11 @@ export class MpvService {
       if (hwnd && hwnd > 0) {
         args.push(`--wid=${hwnd}`);
         args.push('--no-border');
-        // Ensure the video content stays within the window
         args.push('--no-keepaspect');
-        // Disable hwdec when embedding in transparent Electron window
-        // GPU compositing conflicts with HWND embedding on Windows
-        args.push('--hwdec=no');
-        // Force software renderer to avoid GPU conflicts
-        args.push('--vo=gpu-next');
+        // Try d3d11 output for transparent window embedding
+        args.push('--vo=gpu');
+        args.push('--gpu-context=d3d11');
+        args.push('--gpu-api=d3d11');
       } else {
         args.push('--hwdec=auto');
       }
