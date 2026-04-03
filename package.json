@@ -8,7 +8,7 @@
     "build": "tsc && vite build && electron-builder",
     "build:win": "tsc && vite build && electron-builder --win",
     "build:mac": "tsc && vite build && electron-builder --mac",
-    "build:all": "tsc && vite build && electron-builder --win --mac",
+    "build:linux": "tsc && vite build && electron-builder --linux --publish never",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "download-binaries": "node scripts/download-binaries.js"
