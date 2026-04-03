@@ -136,14 +136,35 @@ export class AllDebridService {
         const magnetData = data.data?.magnets || data.data?.magnet;
         const magnet = Array.isArray(magnetData) ? magnetData[0] : magnetData;
 
-        // Files may be at magnet.files or magnetData.links[].files
-        const rawFiles = magnet?.files || [];
-        console.log('[AllDebrid files found]', rawFiles.length);
-        return rawFiles.map((f: any) => ({
-          path: f?.filename || f?.n || f?.path || '',
-          size: f?.size || 0,
-          id: f?.id || 0,
-        }));
+        // Files are in links[].files[] (each .mkv/.mp4 is a "link", files[] contains sub-files)
+        // Or magnet.links[] contains direct download links with their files
+        const links = magnet?.links || [];
+        console.log('[AllDebrid links found]', links.length);
+
+        // Collect all files from all links (for zip/rar archives, files are in links[].files[])
+        const allFiles: Array<{ path: string; size: number; id: number }> = [];
+        for (const link of links) {
+          console.log('[AllDebrid link]', link?.filename, link?.link, 'files:', link?.files?.length || 0);
+          const files = link?.files || [];
+          for (const f of files) {
+            allFiles.push({
+              path: f?.n || f?.filename || f?.path || (link?.filename || ''),
+              size: f?.size || link?.size || 0,
+              id: f?.id || 0,
+            });
+          }
+          // If the link itself is a direct file (no sub-files), add it too
+          if (files.length === 0 && link?.filename) {
+            allFiles.push({
+              path: link.filename,
+              size: link.size || 0,
+              id: 0,
+            });
+          }
+        }
+
+        console.log('[AllDebrid total files]', allFiles.length);
+        return allFiles;
       }
 
       return [];

@@ -135,8 +135,10 @@ export default function PlayerPage() {
       }
 
       setTorrentStatus('Fetching file list...');
+      console.log('[PlayerPage] Fetching files for torrentId:', torrentId);
       const files = await window.electronAPI.getTorrentFiles(torrentId);
       const fileList = (files as TorrentFile[]) || [];
+      console.log('[PlayerPage] getTorrentFiles returned:', JSON.stringify(fileList, null, 2));
       setTorrentFiles(fileList);
 
       // Filter video files (mkv, mp4, webm, avi)
@@ -148,6 +150,8 @@ export default function PlayerPage() {
         })
         .sort((a, b) => (b.size || 0) - (a.size || 0));
 
+      console.log('[PlayerPage] Filtered video files:', videoFiles.length);
+
       if (videoFiles.length > 1) {
         // Multiple video files - let user choose
         setTorrentStatus('Select a file to watch');
@@ -156,8 +160,11 @@ export default function PlayerPage() {
       }
 
       if (videoFiles.length === 0) {
-        console.log('[PlayerPage] All files in torrent:', JSON.stringify(fileList, null, 2));
-        setError(`No video files found in this torrent. Files: ${fileList.map(f => f.path).join(', ') || '(empty)'}`);
+        // Show ALL files for debugging
+        const fileSummary = fileList.length > 0
+          ? JSON.stringify(fileList, null, 2)
+          : 'EMPTY - AllDebrid returned no files at all';
+        setError(`No video files found in this torrent.\n\nFiles: ${fileSummary}`);
         setIsLoading(false);
         return;
       }
