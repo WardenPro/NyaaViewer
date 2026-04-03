@@ -1,6 +1,10 @@
 import axios, { AxiosInstance } from 'axios';
+import * as fs from 'fs';
+import * as path from 'path';
+import { tmpdir } from 'os';
 
 const AD_BASE = 'https://api.alldebrid.com';
+const DEBUG_FILE = path.join(tmpdir(), 'nyaa-debug.json');
 
 export class AllDebridService {
   private client: AxiosInstance;
@@ -56,17 +60,14 @@ export class AllDebridService {
 
     try {
       const params = new URLSearchParams();
-      params.append('magnets', magnetUri);
+      params.append('magnets[]', magnetUri);
 
       const response = await this.client.post('/v4/magnet/upload', params.toString(), {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       });
 
       const data = response.data;
-
-      // Write debug file
-      const debugPath = require('path').join(require('os').tmpdir(), 'nyaa-debug.json');
-      require('fs').writeFileSync(debugPath, JSON.stringify({ uploadResponse: data, rawData: JSON.stringify(data, null, 2) }, null, 2));
+      fs.writeFileSync(DEBUG_FILE, JSON.stringify({ uploadResponse: data }, null, 2));
 
       if (data?.status === 'success' && data?.data?.magnets?.length > 0) {
         const magnet = data.data.magnets[0];
@@ -98,14 +99,23 @@ export class AllDebridService {
     this.ensureKey();
 
     try {
-      const params = new URLSearchParams();
-      params.append('id', String(id));
+      const body = new URLSearchParams();
+      body.append('id', String(id));
 
-      const response = await this.client.post('/v4.1/magnet/status', params.toString(), {
+      console.log('[AllDebrid] status request, id:', id);
+      const response = await this.client.post('/v4.1/magnet/status', body.toString(), {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       });
 
       const data = response.data;
+      try {
+        const existing = JSON.parse(fs.readFileSync(DEBUG_FILE, 'utf-8'));
+        existing.statusResponse = data;
+        fs.writeFileSync(DEBUG_FILE, JSON.stringify(existing, null, 2));
+      } catch {
+        fs.writeFileSync(DEBUG_FILE, JSON.stringify({ statusResponse: data, rawId: id }, null, 2));
+      }
+
       if (data?.status === 'success') {
         const magnet = data.data?.magnet;
         if (magnet) {
@@ -131,8 +141,17 @@ export class AllDebridService {
         }
       }
 
-      return { ready: false, error: data?.error?.message };
+      console.error('[AllDebrid] status failed:', data?.error);
+      return { ready: false, error: data?.error?.message || 'Unknown error' };
     } catch (e: any) {
+      console.error('[AllDebrid] status call error:', e.response?.data?.error?.message || e.message);
+      try {
+        const existing = JSON.parse(fs.readFileSync(DEBUG_FILE, 'utf-8'));
+        existing.statusError = e.response?.data?.error || { message: e.message };
+        fs.writeFileSync(DEBUG_FILE, JSON.stringify(existing, null, 2));
+      } catch {
+        fs.writeFileSync(DEBUG_FILE, JSON.stringify({ statusError: e.response?.data?.error || { message: e.message } }, null, 2));
+      }
       return { ready: false, error: e.response?.data?.error?.message || e.message };
     }
   }
@@ -141,20 +160,19 @@ export class AllDebridService {
     this.ensureKey();
 
     try {
-      const params = new URLSearchParams();
-      params.append('id', String(id));
+      const body = new URLSearchParams();
+      body.append('id[]', String(id));
 
-      const response = await this.client.post('/v4/magnet/files', params.toString(), {
+      const response = await this.client.post('/v4/magnet/files', body.toString(), {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       });
 
       const data = response.data;
-      const debugPath = require('path').join(require('os').tmpdir(), 'nyaa-debug.json');
-      require('fs').writeFileSync(debugPath, JSON.stringify(data, null, 2));
-      console.log('[AllDebrid] files debug written to:', debugPath);
+      fs.writeFileSync(DEBUG_FILE, JSON.stringify(data, null, 2));
+      console.log('[AllDebrid] files debug written to:', DEBUG_FILE);
 
       if (data?.status === 'success' && data?.data?.magnets) {
-        const magnetEntry = data.data.magnets.find((m: any) => m.id === id);
+        const magnetEntry = data.data.magnets.find((m: any) => String(m.id) === String(id));
         if (magnetEntry?.files) {
           const files: Array<{ path: string; size: number; id: number }> = [];
           const flattenFiles = (nodes: any[], prefix = ''): Array<{ path: string; size: number; id: number }> => {
@@ -214,50 +232,6 @@ export class AllDebridService {
       return { success: false, error: data?.error?.message || 'Unlock failed' };
     } catch (e: any) {
       return { success: false, error: e.response?.data?.error?.message || e.message };
-    }
-  }
-
-  async getFilesWithLinks(id: number): Promise<Array<{
-    path: string;
-    size: number;
-    id: number;
-    link?: string;
-  }>> {
-    this.ensureKey();
-
-    try {
-      const params = new URLSearchParams();
-      params.append('id', String(id));
-
-      const response = await this.client.post('/v4/magnet/files', params.toString(), {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      });
-
-      const data = response.data;
-      if (data?.status === 'success' && data?.data?.magnets) {
-        const magnetEntry = data.data.magnets.find((m: any) => m.id === id);
-        if (magnetEntry?.files) {
-          const files: Array<{ path: string; size: number; id: number; link?: string }> = [];
-          const flattenFiles = (nodes: any[], prefix = '') => {
-            nodes.forEach((node, idx) => {
-              const name = node.n || '';
-              const fullPath = prefix ? `${prefix}/${name}` : name;
-              if (node.e && Array.isArray(node.e)) {
-                flattenFiles(node.e, fullPath);
-              } else if (node.l) {
-                files.push({ path: fullPath, size: node.s || 0, id: idx + 1, link: node.l });
-              }
-            });
-          };
-          flattenFiles(magnetEntry.files);
-          return files;
-        }
-      }
-
-      return [];
-    } catch (e: any) {
-      console.error('Get files with links failed:', e);
-      return [];
     }
   }
 

@@ -3,6 +3,8 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import useAppStore from '../store/appStore';
 import SubtitleSelector from '../components/SubtitleSelector';
 
+const VIDEO_EXTS = ['.mkv', '.mp4', '.webm', '.avi', '.mov', '.wmv'];
+
 interface SubtitleTrack {
   id: number;
   language: string;
@@ -141,17 +143,16 @@ export default function PlayerPage() {
 
       setTorrentStatus('Fetching file list...');
       console.log('[PlayerPage] Fetching files for torrentId:', torrentId);
-      const files = await window.electronAPI.getTorrentFiles(torrentId);
-      const fileList = (files as TorrentFile[]) || [];
+      const filesResult = await window.electronAPI.getTorrentFiles(torrentId);
+      const fileList = Array.isArray(filesResult) ? (filesResult as TorrentFile[]) : [];
       console.log('[PlayerPage] getTorrentFiles returned:', JSON.stringify(fileList, null, 2));
+
       setTorrentFiles(fileList);
 
-      // Filter video files (mkv, mp4, webm, avi)
-      const videoExtensions = ['.mkv', '.mp4', '.webm', '.avi', '.mov', '.wmv'];
       const videoFiles = fileList
         .filter((f) => {
           const ext = '.' + (f.path?.split('.').pop() || '').toLowerCase();
-          return videoExtensions.includes(ext);
+          return VIDEO_EXTS.includes(ext);
         })
         .sort((a, b) => (b.size || 0) - (a.size || 0));
 
@@ -321,11 +322,10 @@ export default function PlayerPage() {
 
   // File selection (multiple video files)
   if (torrentFiles.length > 0 && !player.isPlaying) {
-    const videoExtensions = ['.mkv', '.mp4', '.webm', '.avi', '.mov', '.wmv'];
     const videoFiles = torrentFiles
       .filter((f) => {
         const ext = '.' + (f.path?.split('.').pop() || '').toLowerCase();
-        return videoExtensions.includes(ext);
+        return VIDEO_EXTS.includes(ext);
       })
       .sort((a, b) => (b.size || 0) - (a.size || 0));
 
@@ -362,14 +362,14 @@ export default function PlayerPage() {
           {/* Show non-video files as info */}
           {torrentFiles.filter((f) => {
             const ext = '.' + (f.path?.split('.').pop() || '').toLowerCase();
-            return !videoExtensions.includes(ext);
+            return !VIDEO_EXTS.includes(ext);
           }).length > 0 && (
             <div className="mt-4">
               <p className="text-sm text-dark-textMuted mb-2">Other files in torrent:</p>
               {torrentFiles
                 .filter((f) => {
                   const ext = '.' + (f.path?.split('.').pop() || '').toLowerCase();
-                  return !videoExtensions.includes(ext);
+                  return !VIDEO_EXTS.includes(ext);
                 })
                 .slice(0, 5)
                 .map((f) => (
@@ -462,7 +462,7 @@ export default function PlayerPage() {
               {['en', 'fr', 'ja', 'und'].map((lang) => (
                 <button
                   key={lang}
-                  onClick={() => window.electronAPI.setSubtitleTrack('auto')}
+                  onClick={() => window.electronAPI.setSubtitleTrack(lang === 'und' ? 'auto' : lang)}
                   className={`w-full text-left px-3 py-1.5 rounded text-sm transition-colors ${
                     preferredLang === lang
                       ? 'bg-primary/20 text-primary'
