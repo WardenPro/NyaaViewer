@@ -34,7 +34,9 @@ jobs:
 
       - name: Build macOS
         if: matrix.os == 'macos-latest'
-        run: npx electron-builder --mac --publish never --mac.identity=null
+        run: npx electron-builder --mac --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
 
       - name: Build Linux
         if: matrix.os == 'ubuntu-latest'
