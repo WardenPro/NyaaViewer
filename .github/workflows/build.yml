@@ -61,16 +61,22 @@ jobs:
           cp -r dist/* release/
           zip -r release/nyaa-viewer-dist.zip release/*
 
-      - name: Upload artifacts
+      - name: Upload setup installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.os }}
+          path: |
+            release/*.exe
+            release/*.AppImage
+            release/*.dmg
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload build
         uses: actions/upload-artifact@v4
         with:
           name: build-${{ matrix.os }}
-          path: |
-            dist/**/*.exe
-            dist/**/*.AppImage
-            dist/**/*.dmg
-            dist/**/*.zip
-            release/**/*
+          path: release/nyaa-viewer-dist.zip
           retention-days: 30
 
   release:
@@ -89,17 +95,23 @@ jobs:
         id: version
         run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
 
-      - name: Download artifacts
+      - name: Download and flatten artifacts
         uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect release files
+        run: |
+          mkdir -p release_files
+          find artifacts -type f | while read f; do
+            cp "$f" release_files/
+          done
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: v${{ steps.version.outputs.version }}
-          files: |
-            build-ubuntu-latest/*
-            build-windows-latest/*
-            build-macos-latest/*
+          files: release_files/*
           generate_release_notes: true
           make_latest: true
