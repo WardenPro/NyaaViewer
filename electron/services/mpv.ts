@@ -24,6 +24,20 @@ export class MpvService {
     try {
       await this.stop();
 
+      const mpvPath = getMpvPath();
+      
+      // Check if mpv exists
+      if (!fs.existsSync(mpvPath)) {
+        const whichCmd = process.platform === 'win32' ? 'where' : 'which';
+        const { execSync } = require('child_process');
+        try {
+          const result = execSync(whichCmd + ' mpv', { encoding: 'utf8' });
+          console.log('[mpv] Found in PATH:', result.trim());
+        } catch {
+          return { success: false, error: 'mpv not found. Please install mpv.' };
+        }
+      }
+
       const tmpDir = path.join(os.tmpdir(), 'nyaa-viewer');
       if (!fs.existsSync(tmpDir)) {
         fs.mkdirSync(tmpDir, { recursive: true });
@@ -57,7 +71,6 @@ export class MpvService {
         args.push('--force-window=yes');
       }
 
-      const mpvPath = getMpvPath();
       console.log('[mpv] Starting:', mpvPath);
       console.log('[mpv] Args:', args.join(' '));
 
@@ -67,7 +80,10 @@ export class MpvService {
       });
 
       this.mpvProcess.stderr?.on('data', (data) => {
-        console.log('[mpv]', data.toString().trim());
+        const msg = data.toString().trim();
+        if (msg) {
+          console.log('[mpv stderr]', msg);
+        }
       });
 
       this.mpvProcess.on('error', (err) => {
@@ -84,7 +100,7 @@ export class MpvService {
         this.events.onEnded?.();
       });
 
-      await this.waitForSocket();
+      await this.waitForSocket(30000);
       await this.connectIpc();
 
       this.isPlaying = true;
