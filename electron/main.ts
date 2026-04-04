@@ -9,7 +9,6 @@ import { registerSearchHandlers } from './ipc/search';
 import { registerAllDebridHandlers } from './ipc/alldebrid';
 import { registerPlayerHandlers } from './ipc/player';
 import { registerStorageHandlers } from './utils/storage';
-import { videoWindow } from './services/video-window';
 
 // Auto-updater (only available in production builds)
 let autoUpdater: import('electron-updater').AppUpdater | null = null;
@@ -96,19 +95,7 @@ function createWindow(): void {
     },
   });
 
-  // Sync video child window on main window move/resize
-  mainWindow.on('move', () => {
-    // The child window has parent: mainWindow, so it moves with it
-  });
-
-  mainWindow.on('resize', () => {
-    if (videoWindow.exists() && mainWindow) {
-      mainWindow.webContents.send('video-window-moved');
-    }
-  });
-
   mainWindow.on('closed', () => {
-    videoWindow.destroy();
     mainWindow = null;
   });
 
