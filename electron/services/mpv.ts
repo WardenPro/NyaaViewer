@@ -23,9 +23,11 @@ export class MpvService {
   }
 
   /**
-   * Start playback of a URL via mpv, optionally embedded in a given window (HWND).
+   * Start playback of a URL via mpv, optionally embedded in a given window.
+   * @param url The stream URL to play
+   * @param wid Window ID: number for Windows handle, hex string (e.g., "0x12345678") for Linux X11
    */
-  async startPlayback(url: string, hwnd?: number): Promise<{ success: boolean; error?: string }> {
+  async startPlayback(url: string, wid?: string | number): Promise<{ success: boolean; error?: string }> {
     try {
       // Stop any existing instance
       await this.stop();
@@ -59,14 +61,19 @@ export class MpvService {
       ];
 
       // Embed in the given window (HWND) on Windows
-      if (hwnd && hwnd > 0) {
-        args.push(`--wid=${hwnd}`);
+      if (wid) {
+        args.push(`--wid=${wid}`);
         args.push('--no-border');
         args.push('--no-keepaspect');
-        // Try d3d11 output for transparent window embedding
         args.push('--vo=gpu');
-        args.push('--gpu-context=d3d11');
-        args.push('--gpu-api=d3d11');
+        args.push('--force-window=immediate');
+        if (process.platform === 'win32') {
+          args.push('--gpu-context=d3d11');
+          args.push('--gpu-api=d3d11');
+        } else {
+          args.push('--gpu-context=x11');
+        }
+        await new Promise(resolve => setTimeout(resolve, 500));
       } else {
         args.push('--hwdec=auto');
       }
@@ -74,7 +81,7 @@ export class MpvService {
       const mpvPath = getMpvPath();
       console.log(`[mpv] Spawning: ${mpvPath}`);
       console.log(`[mpv] Args: ${args.join(' ')}`);
-      console.log(`[mpv] HWND: ${hwnd || 'none (window mode)'}`);
+      console.log(`[mpv] WID: ${wid || 'none (window mode)'}`);
 
       this.mpvProcess = spawn(mpvPath, args, {
         env: {

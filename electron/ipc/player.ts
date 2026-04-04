@@ -15,8 +15,8 @@ export function registerPlayerHandlers(): void {
 
   ipcMain.handle('start-playback', async (_event, url: string) => {
     try {
-      const hwnd = videoWindow.getHwnd();
-      const result = await mpvService.startPlayback(url, hwnd || undefined);
+      const wid = videoWindow.getWindowId();
+      const result = await mpvService.startPlayback(url, wid || undefined);
       return result;
     } catch (e: any) {
       return { success: false, error: e.message };
@@ -49,7 +49,7 @@ export function registerPlayerHandlers(): void {
 
   ipcMain.handle('show-video-window', async (_event, bounds: { x: number; y: number; width: number; height: number }) => {
     videoWindow.show(bounds);
-    return videoWindow.getHwnd();
+    return videoWindow.getWindowId();
   });
 
   ipcMain.handle('hide-video-window', async () => {

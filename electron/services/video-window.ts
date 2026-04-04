@@ -76,17 +76,26 @@ export class VideoWindowService {
   }
 
   /**
-   * Get the HWND of the video window for mpv --wid.
+   * Get the handle for mpv --wid.
+   * On Linux X11: returns the X11 Window ID as a hex string (required format for mpv).
+   * On Windows: returns the HWND as an integer.
    */
-  getHwnd(): number | null {
+  getWindowId(): string | number | null {
     if (!this.videoWindow || this.videoWindow.isDestroyed()) {
       return null;
     }
     const handle = this.videoWindow.getNativeWindowHandle();
-    if (handle.length >= 4) {
+    
+    if (process.platform === 'win32') {
       return handle.readInt32LE(0);
+    } else if (process.platform === 'darwin') {
+      return handle.readUInt32LE(0);
+    } else {
+      // Linux X11: handle is a buffer with the X11 Window ID
+      // mpv expects it as a hex string (e.g., "0x12345678")
+      const xid = handle.readBigUInt64LE(0);
+      return '0x' + xid.toString(16);
     }
-    return null;
   }
 
   /**
