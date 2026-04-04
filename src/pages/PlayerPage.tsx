@@ -42,17 +42,14 @@ export default function PlayerPage() {
   const [pollProgress, setPollProgress] = useState(0);
   const [showDebug, setShowDebug] = useState(false);
   const [debugContent, setDebugContent] = useState('');
-  const [currentVideoUrl, setCurrentVideoUrl] = useState<string>('');
 
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const videoAreaRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    window.electronAPI.setupVideoWindow();
     return () => {
-      if (videoRef.current) {
-        videoRef.current.pause();
-        videoRef.current.src = '';
-      }
-      setCurrentVideoUrl('');
+      window.electronAPI.stopPlayback();
+      window.electronAPI.hideVideoWindow();
     };
   }, []);
 
@@ -63,67 +60,81 @@ export default function PlayerPage() {
   }, [torrent?.infohash]);
 
   useEffect(() => {
-    if (player.isPlaying && videoRef.current && currentVideoUrl) {
-      videoRef.current.src = currentVideoUrl;
-      videoRef.current.play().catch(console.error);
-      
-      if (player.currentPosition > 0) {
-        videoRef.current.currentTime = player.currentPosition;
+    if (!player.isPlaying) return;
+
+    const reposition = () => {
+      if (videoAreaRef.current) {
+        const rect = videoAreaRef.current.getBoundingClientRect();
+        window.electronAPI.showVideoWindow({
+          x: rect.left,
+          y: rect.top,
+          width: rect.width,
+          height: rect.height,
+        });
       }
+    };
+
+    const observer = new ResizeObserver(reposition);
+    if (videoAreaRef.current) {
+      observer.observe(videoAreaRef.current);
     }
-  }, [player.isPlaying, currentVideoUrl]);
+
+    reposition();
+    return () => observer.disconnect();
+  }, [player.isPlaying]);
 
   useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    const handleTimeUpdate = () => {
+    const posHandler = (data: { position: number; duration: number }) => {
       setPlayerState({
-        currentPosition: video.currentTime,
+        currentPosition: data.position,
+        duration: data.duration,
       });
+
+      if (player.currentTorrent) {
+        window.electronAPI.updateWatchPosition(player.currentTorrent.infohash, data.position, data.duration);
+      }
     };
 
-    const handleDurationChange = () => {
-      setPlayerState({
-        duration: video.duration || 0,
-      });
+    const tracksHandler = (tracks: any[]) => {
+      setSubtitleTracks(tracks.map((t) => ({
+        id: t.id,
+        language: t.lang || 'unknown',
+        codec: t.codec || 'unknown',
+        name: t.title || t.lang || `Track ${t.id}`,
+        forced: t.forced || false,
+        default: t.default || false,
+      })));
     };
 
-    const handleEnded = () => {
+    const endedHandler = () => {
       resetPlayerState();
       navigate('/search');
     };
 
-    const handleError = (e: Event) => {
-      console.error('Video error:', e);
-      setError(`Video playback error: ${(e as ErrorEvent).message || 'Unknown error'}`);
+    const errorHandler = (err: string) => {
+      setError('Playback error: ' + err);
     };
 
-    video.addEventListener('timeupdate', handleTimeUpdate);
-    video.addEventListener('durationchange', handleDurationChange);
-    video.addEventListener('ended', handleEnded);
-    video.addEventListener('error', handleError);
+    window.electronAPI.onPlayerPositionUpdate(posHandler);
+    window.electronAPI.onPlayerTracksUpdate(tracksHandler);
+    window.electronAPI.onPlayerEnded(endedHandler);
+    window.electronAPI.onPlayerError(errorHandler);
 
-    return () => {
-      video.removeEventListener('timeupdate', handleTimeUpdate);
-      video.removeEventListener('durationchange', handleDurationChange);
-      video.removeEventListener('ended', handleEnded);
-      video.removeEventListener('error', handleError);
-    };
-  }, [setPlayerState, resetPlayerState, navigate]);
+    return () => {};
+  }, [player.currentTorrent, setPlayerState, resetPlayerState, navigate]);
 
   useEffect(() => {
     const interval = setInterval(() => {
-      if (player.isPlaying && player.currentTorrent && videoRef.current) {
+      if (player.isPlaying && player.currentTorrent) {
         window.electronAPI.updateWatchPosition(
           player.currentTorrent.infohash,
-          videoRef.current.currentTime,
-          videoRef.current.duration || player.duration,
+          player.currentPosition,
+          player.duration,
         );
       }
     }, 30000);
     return () => clearInterval(interval);
-  }, [player.isPlaying, player.currentTorrent]);
+  }, [player.isPlaying, player.currentTorrent, player.currentPosition, player.duration]);
 
   const startTorrentFlow = useCallback(async (torrentData: typeof torrent) => {
     if (!torrentData) return;
@@ -145,7 +156,7 @@ export default function PlayerPage() {
       const magnetData = uploadResult as { id?: number; ready?: boolean; status?: string; error?: string };
 
       if (!magnetData.id) {
-        setError(`Failed to upload magnet: ${magnetData.error || 'Unknown error'}`);
+        setError('Failed to upload magnet: ' + (magnetData.error || 'Unknown error'));
         setIsLoading(false);
         return;
       }
@@ -167,7 +178,7 @@ export default function PlayerPage() {
             break;
           }
 
-          setTorrentStatus(`AllDebrid status: ${status?.status || 'processing...'} (${attempts * 5}s)`);
+          setTorrentStatus('AllDebrid status: ' + (status?.status || 'processing...') + ' (' + (attempts * 5) + 's)');
           setPollProgress((attempts / 120) * 100);
           attempts++;
         }
@@ -196,14 +207,14 @@ export default function PlayerPage() {
         const fileSummary = fileList.length > 0
           ? JSON.stringify(fileList.slice(0, 5), null, 2)
           : 'EMPTY - AllDebrid returned no files at all';
-        setError(`No video files found in this torrent.\n\nFiles: ${fileSummary}`);
+        setError('No video files found in this torrent.\n\nFiles: ' + fileSummary);
         setIsLoading(false);
         return;
       }
 
       await playFile(videoFiles[0]);
     } catch (e: unknown) {
-      setError(`Error: ${(e as Error)?.message || 'Unknown error'}`);
+      setError('Error: ' + ((e as Error)?.message || 'Unknown error'));
       setIsLoading(false);
     }
   }, []);
@@ -211,11 +222,11 @@ export default function PlayerPage() {
   const playFile = async (file: TorrentFile) => {
     setSelectedFile(file);
     setIsLoading(true);
-    setTorrentStatus(`Unlocking "${file.path}" for streaming...`);
+    setTorrentStatus('Unlocking "' + file.path + '" for streaming...');
 
     try {
       if (!file.link) {
-        setError(`No download link available for "${file.path}"`);
+        setError('No download link available for "' + file.path + '"');
         setIsLoading(false);
         return;
       }
@@ -224,61 +235,56 @@ export default function PlayerPage() {
       const unlockData = unlockResult as { success: boolean; link?: string; error?: string };
 
       if (!unlockData.success || !unlockData.link) {
-        setError(`Failed to get streaming link: ${unlockData.error || 'No link returned'}`);
+        setError('Failed to get streaming link: ' + (unlockData.error || 'No link returned'));
         setIsLoading(false);
         return;
       }
 
-      setCurrentVideoUrl(unlockData.link);
+      setTorrentStatus('Starting playback...');
+
+      const result = await window.electronAPI.startPlayback(unlockData.link);
+      if (!result?.success) {
+        setError('Failed to start playback: ' + (result?.error || 'Unknown error'));
+        setIsLoading(false);
+        return;
+      }
+
       setPlayerState({
         isPlaying: true,
         currentTorrent: torrent as any,
-        currentPosition: 0,
-        duration: 0,
       });
 
       setError('');
       setIsLoading(false);
       setTorrentStatus('');
     } catch (e: unknown) {
-      setError(`Playback error: ${(e as Error)?.message || 'Unknown'}`);
+      setError('Playback error: ' + ((e as Error)?.message || 'Unknown'));
       setIsLoading(false);
     }
   };
 
   const handleStop = async () => {
-    if (videoRef.current) {
-      videoRef.current.pause();
-      videoRef.current.src = '';
-    }
-    setCurrentVideoUrl('');
+    await window.electronAPI.stopPlayback();
     resetPlayerState();
     navigate('/search');
   };
 
-  const handlePause = () => {
-    if (videoRef.current) {
-      if (videoRef.current.paused) {
-        videoRef.current.play().catch(console.error);
-        setPlayerState({ isPlaying: true });
-      } else {
-        videoRef.current.pause();
-        setPlayerState({ isPlaying: false });
-      }
-    }
+  const handlePause = async () => {
+    await window.electronAPI.pausePlayback();
+    setPlayerState({ isPlaying: !player.isPlaying });
   };
 
-  const handleSeek = (position: number) => {
-    if (videoRef.current) {
-      videoRef.current.currentTime = position;
-      setPlayerState({ currentPosition: position });
-    }
+  const handleSeek = async (position: number) => {
+    await window.electronAPI.seekPlayback(position);
+    setPlayerState({ currentPosition: position });
   };
 
-  const handleSubtitleChange = (trackId: string) => {
+  const handleSubtitleChange = async (trackId: string) => {
     setSelectedSubtitle(trackId);
-    if (videoRef.current && trackId === '') {
-      videoRef.current.textTracks[0] && (videoRef.current.textTracks[0].mode = 'hidden');
+    if (trackId === '') {
+      await window.electronAPI.setSubtitleTrack('no');
+    } else {
+      await window.electronAPI.setSubtitleTrack(parseInt(trackId, 10));
     }
   };
 
@@ -295,7 +301,7 @@ export default function PlayerPage() {
               <div className="w-full bg-dark-border rounded-full h-2">
                 <div
                   className="bg-primary h-2 rounded-full transition-all"
-                  style={{ width: `${pollProgress}%` }}
+                  style={{ width: pollProgress + '%' }}
                 />
               </div>
               <p className="text-xs text-dark-textMuted">
@@ -429,14 +435,29 @@ export default function PlayerPage() {
         </div>
 
         <div className="flex-1 flex overflow-hidden">
-          <div className="flex-1 flex flex-col bg-black">
-            <video
-              ref={videoRef}
-              className="w-full h-full"
-              controls
-              autoPlay
-              playsInline
+          <div className="flex-1 flex flex-col">
+            <div
+              ref={videoAreaRef}
+              className="flex-1 bg-black relative"
             />
+
+            {player.duration > 0 && player.duration < Infinity && (
+              <div className="px-6 py-3 bg-dark-card border-t border-dark-border">
+                <input
+                  type="range"
+                  min={0}
+                  max={player.duration}
+                  step={0.1}
+                  value={player.currentPosition}
+                  onChange={(e) => handleSeek(Number(e.target.value))}
+                  className="w-full accent-primary h-2 cursor-pointer"
+                />
+                <div className="flex justify-between text-xs text-dark-textMuted mt-1">
+                  <span>{formatTime(player.currentPosition)}</span>
+                  <span>{formatTime(player.duration)}</span>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="w-72 bg-dark-card border-l border-dark-border p-4 space-y-6 overflow-y-auto">
@@ -487,6 +508,6 @@ function formatTime(seconds: number): string {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = Math.floor(seconds % 60);
-  if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  return `${m}:${s.toString().padStart(2, '0')}`;
+  if (h > 0) return h + ':' + m.toString().padStart(2, '0') + ':' + s.toString().padStart(2, '0');
+  return m + ':' + s.toString().padStart(2, '0');
 }

@@ -47,6 +47,12 @@ const api = {
     ipcRenderer.invoke('get-subtitle-tracks', filePath),
   onPlayerPositionUpdate: (callback: (data: { position: number; duration: number }) => void) =>
     ipcRenderer.on('player-position-update', (_event, data) => callback(data)),
+  onPlayerTracksUpdate: (callback: (tracks: unknown[]) => void) =>
+    ipcRenderer.on('player-tracks-update', (_event, tracks) => callback(tracks)),
+  onPlayerEnded: (callback: () => void) =>
+    ipcRenderer.on('player-ended', () => callback()),
+  onPlayerError: (callback: (error: string) => void) =>
+    ipcRenderer.on('player-error', (_event, error) => callback(error)),
 
   // Storage
   getWatchHistory: () =>
@@ -93,6 +99,9 @@ export interface ElectronAPI {
   setSubtitleTrack: (trackId: string | number) => Promise<void>;
   getSubtitleTracks: (filePath: string) => Promise<unknown[]>;
   onPlayerPositionUpdate: (callback: (data: { position: number; duration: number }) => void) => void;
+  onPlayerTracksUpdate: (callback: (tracks: unknown[]) => void) => void;
+  onPlayerEnded: (callback: () => void) => void;
+  onPlayerError: (callback: (error: string) => void) => void;
   onUploadMagnetDebug: (callback: (data: string) => void) => void;
   getWatchHistory: () => Promise<unknown[]>;
   addWatchEntry: (entry: unknown) => Promise<void>;
