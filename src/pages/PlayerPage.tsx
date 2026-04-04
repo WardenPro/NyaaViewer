@@ -6,12 +6,9 @@ import SubtitleSelector from '../components/SubtitleSelector';
 const VIDEO_EXTS = ['.mkv', '.mp4', '.webm', '.avi', '.mov', '.wmv'];
 
 interface SubtitleTrack {
-  id: number;
+  id: string;
   language: string;
   codec: string;
-  name: string;
-  forced: boolean;
-  default: boolean;
 }
 
 interface TorrentFile {
@@ -25,66 +22,60 @@ export default function PlayerPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const player = useAppStore((s) => s.player);
-
-  const torrentFromState = location.state?.torrent as Partial<{ title: string; infohash: string; magnetUri: string }> | undefined;
-  const torrent = torrentFromState || player.currentTorrent;
-
   const setPlayerState = useAppStore((s) => s.setPlayerState);
   const resetPlayerState = useAppStore((s) => s.resetPlayerState);
 
+  const torrentFromState = location.state?.torrent as any;
+  const torrent = torrentFromState || player.currentTorrent;
+
   const [isLoading, setIsLoading] = useState(false);
-  const [torrentStatus, setTorrentStatus] = useState('');
+  const [statusText, setStatusText] = useState('');
   const [torrentFiles, setTorrentFiles] = useState<TorrentFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<TorrentFile | null>(null);
-  const [subtitleTracks, setSubtitleTracks] = useState<SubtitleTrack[]>([]);
-  const [selectedSubtitle, setSelectedSubtitle] = useState<string>('');
   const [error, setError] = useState('');
   const [pollProgress, setPollProgress] = useState(0);
   const [showDebug, setShowDebug] = useState(false);
   const [debugContent, setDebugContent] = useState('');
+  const [subtitleTracks, setSubtitleTracks] = useState<SubtitleTrack[]>([]);
+  const [selectedSubtitle, setSelectedSubtitle] = useState<string>('');
 
-  const videoAreaRef = useRef<HTMLDivElement>(null);
+  const isFlowStarted = useRef(false);
 
+  // Initialize: stop any previous playback
   useEffect(() => {
     window.electronAPI.stopPlayback();
+    return () => {
+      // Cleanup on unmount
+      if (location.pathname !== '/player') {
+        window.electronAPI.stopPlayback();
+      }
+    };
   }, []);
 
-  useEffect(() => {
-    if (torrent && !isLoading && torrentFiles.length === 0 && !player.isPlaying) {
-      startTorrentFlow(torrent);
-    }
-  }, [torrent?.infohash]);
-
+  // IPC Event Listeners
   useEffect(() => {
     const posHandler = (data: { position: number; duration: number }) => {
       setPlayerState({
         currentPosition: data.position,
         duration: data.duration,
       });
-
-      if (player.currentTorrent) {
-        window.electronAPI.updateWatchPosition(player.currentTorrent.infohash, data.position, data.duration);
-      }
     };
 
     const tracksHandler = (tracks: any[]) => {
-      setSubtitleTracks(tracks.map((t) => ({
-        id: t.id,
-        language: t.lang || 'unknown',
+      setSubtitleTracks(tracks.map((t: any) => ({
+        id: String(t.id),
+        language: t.lang || t.language || 'und',
         codec: t.codec || 'unknown',
-        name: t.title || t.lang || `Track ${t.id}`,
-        forced: t.forced || false,
-        default: t.default || false,
       })));
     };
 
     const endedHandler = () => {
-      resetPlayerState();
-      navigate('/search');
+      handleStop();
     };
 
     const errorHandler = (err: string) => {
       setError('Playback error: ' + err);
+      setIsLoading(false);
     };
 
     window.electronAPI.onPlayerPositionUpdate(posHandler);
@@ -92,9 +83,12 @@ export default function PlayerPage() {
     window.electronAPI.onPlayerEnded(endedHandler);
     window.electronAPI.onPlayerError(errorHandler);
 
-    return () => {};
-  }, [player.currentTorrent, setPlayerState, resetPlayerState, navigate]);
+    return () => {
+      // Clean listeners would be better here if API allowed
+    };
+  }, [setPlayerState]);
 
+  // Periodic Watch History Update
   useEffect(() => {
     const interval = setInterval(() => {
       if (player.isPlaying && player.currentTorrent) {
@@ -104,133 +98,120 @@ export default function PlayerPage() {
           player.duration,
         );
       }
-    }, 30000);
+    }, 15000);
     return () => clearInterval(interval);
   }, [player.isPlaying, player.currentTorrent, player.currentPosition, player.duration]);
 
-  const startTorrentFlow = useCallback(async (torrentData: typeof torrent) => {
-    if (!torrentData) return;
+  const startTorrentFlow = useCallback(async (torrentData: any) => {
+    if (!torrentData || isFlowStarted.current) return;
+    isFlowStarted.current = true;
 
     setIsLoading(true);
     setError('');
-    setTorrentStatus('Checking AllDebrid connection...');
+    setStatusText('Checking AllDebrid...');
 
     try {
       const apiKey = useAppStore.getState().allDebridApiKey;
       if (!apiKey) {
-        setError('AllDebrid API key not configured. Go to Settings first.');
-        setIsLoading(false);
-        return;
+        throw new Error('AllDebrid API key not configured. Please go to Settings.');
       }
 
-      setTorrentStatus('Uploading magnet to AllDebrid...');
-      const uploadResult = await window.electronAPI.uploadMagnet(torrentData.magnetUri);
-      const magnetData = uploadResult as { id?: number; ready?: boolean; status?: string; error?: string };
+      setStatusText('Uploading magnet...');
+      const uploadResult = await window.electronAPI.uploadMagnet(torrentData.magnetUri) as any;
+      if (uploadResult.error) throw new Error(uploadResult.error);
 
-      if (!magnetData.id) {
-        setError('Failed to upload magnet: ' + (magnetData.error || 'Unknown error'));
-        setIsLoading(false);
-        return;
-      }
+      const torrentId = uploadResult.id;
 
-      const torrentId = magnetData.id;
+      if (!uploadResult.ready) {
+        setStatusText('Waiting for AllDebrid to download...');
+        let ready = false;
+        let attempts = 0;
+        const maxAttempts = 240; // 20 minutes
 
-      if (magnetData.ready) {
-        setTorrentStatus('Fetching file list...');
-      } else {
-        setTorrentStatus('Waiting for AllDebrid to download torrent...');
-
-        let attempts = 1;
-        while (attempts <= 120) {
-          await new Promise((r) => setTimeout(r, 5000));
-          const status = await window.electronAPI.getTorrentStatus(torrentId) as { ready?: boolean; status?: string };
-
-          if (status?.ready) {
-            setTorrentStatus('Fetching file list...');
+        while (attempts < maxAttempts) {
+          await new Promise(r => setTimeout(r, 5000));
+          const status = await window.electronAPI.getTorrentStatus(torrentId) as any;
+          
+          if (status.error) throw new Error(status.error);
+          if (status.ready) {
+            ready = true;
             break;
           }
 
-          setTorrentStatus('AllDebrid status: ' + (status?.status || 'processing...') + ' (' + (attempts * 5) + 's)');
-          setPollProgress((attempts / 120) * 100);
+          setStatusText(`Downloading: ${status.status || 'processing'} (${Math.round((attempts / maxAttempts) * 100)}%)`);
+          setPollProgress((attempts / maxAttempts) * 100);
           attempts++;
         }
+
+        if (!ready) throw new Error('Download timed out on AllDebrid side.');
       }
 
-      setTorrentStatus('Fetching file list...');
-      const filesResult = await window.electronAPI.getTorrentFiles(torrentId);
-      const fileList = Array.isArray(filesResult) ? (filesResult as TorrentFile[]) : [];
+      setStatusText('Fetching file list...');
+      const files = await window.electronAPI.getTorrentFiles(torrentId) as TorrentFile[];
+      setTorrentFiles(files);
 
-      setTorrentFiles(fileList);
-
-      const videoFiles = fileList
-        .filter((f) => {
-          const ext = '.' + (f.path?.split('.').pop() || '').toLowerCase();
-          return VIDEO_EXTS.includes(ext);
-        })
-        .sort((a, b) => (b.size || 0) - (a.size || 0));
-
-      if (videoFiles.length > 1) {
-        setTorrentStatus('Select a file to watch');
-        setIsLoading(false);
-        return;
-      }
+      const videoFiles = files
+        .filter(f => VIDEO_EXTS.some(ext => f.path.toLowerCase().endsWith(ext)))
+        .sort((a, b) => b.size - a.size);
 
       if (videoFiles.length === 0) {
-        const fileSummary = fileList.length > 0
-          ? JSON.stringify(fileList.slice(0, 5), null, 2)
-          : 'EMPTY - AllDebrid returned no files at all';
-        setError('No video files found in this torrent.\n\nFiles: ' + fileSummary);
-        setIsLoading(false);
-        return;
+        throw new Error('No video files found in this torrent.');
       }
 
-      await playFile(videoFiles[0]);
-    } catch (e: unknown) {
-      setError('Error: ' + ((e as Error)?.message || 'Unknown error'));
+      if (videoFiles.length === 1) {
+        await playFile(videoFiles[0], torrentData);
+      } else {
+        setStatusText('Multiple video files found. Please select one.');
+        setIsLoading(false);
+      }
+    } catch (e: any) {
+      setError(e.message);
       setIsLoading(false);
+      isFlowStarted.current = false;
     }
   }, []);
 
-  const playFile = async (file: TorrentFile) => {
+  useEffect(() => {
+    if (torrent && !isLoading && torrentFiles.length === 0 && !player.isPlaying) {
+      startTorrentFlow(torrent);
+    }
+  }, [torrent, startTorrentFlow, isLoading, torrentFiles.length, player.isPlaying]);
+
+  const playFile = async (file: TorrentFile, torrentData: any) => {
     setSelectedFile(file);
     setIsLoading(true);
-    setTorrentStatus('Unlocking "' + file.path + '" for streaming...');
+    setError('');
+    setStatusText(`Unlocking: ${file.path.split('/').pop()}`);
 
     try {
-      if (!file.link) {
-        setError('No download link available for "' + file.path + '"');
-        setIsLoading(false);
-        return;
-      }
+      if (!file.link) throw new Error('No link available for this file.');
 
-      const unlockResult = await window.electronAPI.unlockLink(file.link);
-      const unlockData = unlockResult as { success: boolean; link?: string; error?: string };
+      const unlock = await window.electronAPI.unlockLink(file.link) as any;
+      if (!unlock.success) throw new Error(unlock.error || 'Failed to unlock link');
 
-      if (!unlockData.success || !unlockData.link) {
-        setError('Failed to get streaming link: ' + (unlockData.error || 'No link returned'));
-        setIsLoading(false);
-        return;
-      }
-
-      setTorrentStatus('Starting playback...');
-
-      const result = await window.electronAPI.startPlayback(unlockData.link);
-      if (!result?.success) {
-        setError('Failed to start playback: ' + (result?.error || 'Unknown error'));
-        setIsLoading(false);
-        return;
-      }
+      setStatusText('Starting mpv...');
+      const playback = await window.electronAPI.startPlayback(unlock.link) as any;
+      if (!playback.success) throw new Error(playback.error || 'Failed to start mpv');
 
       setPlayerState({
         isPlaying: true,
-        currentTorrent: torrent as any,
+        currentTorrent: torrentData,
       });
 
-      setError('');
+      // Save initial watch entry
+      window.electronAPI.addWatchEntry({
+        infohash: torrentData.infohash,
+        title: torrentData.title,
+        magnetUri: torrentData.magnetUri,
+        lastPosition: 0,
+        duration: 0,
+        lastWatched: new Date().toISOString()
+      });
+
       setIsLoading(false);
-      setTorrentStatus('');
-    } catch (e: unknown) {
-      setError('Playback error: ' + ((e as Error)?.message || 'Unknown'));
+      setStatusText('');
+    } catch (e: any) {
+      setError(e.message);
       setIsLoading(false);
     }
   };
@@ -246,77 +227,78 @@ export default function PlayerPage() {
     setPlayerState({ isPlaying: !player.isPlaying });
   };
 
-  const handleSeek = async (position: number) => {
-    await window.electronAPI.seekPlayback(position);
+  const handleSeek = (position: number) => {
+    window.electronAPI.seekPlayback(position);
     setPlayerState({ currentPosition: position });
   };
 
-  const handleSubtitleChange = async (trackId: string) => {
+  const handleSubtitleChange = (trackId: string) => {
     setSelectedSubtitle(trackId);
-    if (trackId === '') {
-      await window.electronAPI.setSubtitleTrack('no');
-    } else {
-      await window.electronAPI.setSubtitleTrack(parseInt(trackId, 10));
-    }
+    window.electronAPI.setSubtitleTrack(trackId === '' ? 'no' : trackId);
   };
 
   if (isLoading) {
     return (
-      <div className="p-6 h-full flex flex-col items-center justify-center space-y-4">
-        <h2 className="text-xl font-bold">{torrent?.title || 'Loading...'}</h2>
-
-        <div className="w-80 text-center space-y-3">
-          <p className="text-dark-textMuted">{torrentStatus}</p>
-
-          {pollProgress > 0 && pollProgress < 100 && (
-            <div className="space-y-1">
-              <div className="w-full bg-dark-border rounded-full h-2">
-                <div
-                  className="bg-primary h-2 rounded-full transition-all"
-                  style={{ width: pollProgress + '%' }}
-                />
-              </div>
-              <p className="text-xs text-dark-textMuted">
-                {Math.round(pollProgress)}% - Waiting for AllDebrid...
-              </p>
-            </div>
-          )}
-
-          <div className="flex justify-center mt-4">
-            <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
-          </div>
+      <div className="flex flex-col items-center justify-center h-full p-8 space-y-6">
+        <div className="relative w-24 h-24">
+          <div className="absolute inset-0 border-4 border-primary/20 rounded-full"></div>
+          <div className="absolute inset-0 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
         </div>
+        <div className="text-center space-y-2">
+          <h2 className="text-xl font-bold text-white">{torrent?.title || 'Loading...'}</h2>
+          <p className="text-dark-textMuted animate-pulse">{statusText}</p>
+        </div>
+        {pollProgress > 0 && (
+          <div className="w-full max-w-md bg-dark-border h-2 rounded-full overflow-hidden">
+            <div 
+              className="bg-primary h-full transition-all duration-500" 
+              style={{ width: `${pollProgress}%` }}
+            ></div>
+          </div>
+        )}
+        <button 
+          onClick={() => navigate('/search')}
+          className="btn-secondary mt-4"
+        >
+          Cancel
+        </button>
       </div>
     );
   }
 
   if (error) {
-    const handleShowDebug = async () => {
-      setShowDebug(!showDebug);
-      if (!debugContent) {
-        const content = await window.electronAPI.getDebugFile();
-        setDebugContent(content || 'No debug data available');
-      }
-    };
     return (
-      <div className="p-6 h-full flex flex-col items-center justify-center space-y-4">
-        <div className="card border-red-800 bg-red-900/20 max-w-lg text-center space-y-4">
-          <p className="text-red-400 text-lg font-semibold">Playback Error</p>
-          <p className="text-dark-textMuted whitespace-pre-wrap">{error}</p>
-          <div className="flex gap-3 justify-center">
-            <button onClick={handleShowDebug} className="btn-secondary text-xs">
-              {showDebug ? 'Hide Debug' : 'Debug Info'}
+      <div className="flex flex-col items-center justify-center h-full p-8 space-y-6">
+        <div className="card border-red-900/50 bg-red-950/20 max-w-2xl w-full p-8 text-center space-y-6">
+          <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto">
+            <svg className="w-8 h-8 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-2xl font-bold text-red-400">Streaming Error</h2>
+            <p className="text-dark-textMuted break-words">{error}</p>
+          </div>
+          <div className="flex flex-wrap justify-center gap-4">
+            <button onClick={() => { isFlowStarted.current = false; startTorrentFlow(torrent); }} className="btn-primary">
+              Try Again
             </button>
-            <button onClick={() => navigate('/search')} className="btn-primary">
+            <button onClick={() => navigate('/search')} className="btn-secondary">
               Back to Search
             </button>
-            <button onClick={() => navigate('/settings')} className="btn-secondary">
-              Check Settings
+            <button 
+              onClick={async () => {
+                setShowDebug(!showDebug);
+                if (!debugContent) setDebugContent(await window.electronAPI.getDebugFile() || 'No debug data');
+              }} 
+              className="btn-secondary"
+            >
+              {showDebug ? 'Hide Debug' : 'Debug Info'}
             </button>
           </div>
           {showDebug && (
-            <pre className="text-left text-xs bg-black/30 p-3 rounded max-h-96 overflow-auto text-green-400 whitespace-pre-wrap">
-              {debugContent || 'Loading...'}
+            <pre className="mt-4 p-4 bg-black/50 rounded text-left text-xs text-green-400 overflow-auto max-h-64 whitespace-pre-wrap font-mono">
+              {debugContent}
             </pre>
           )}
         </div>
@@ -326,61 +308,38 @@ export default function PlayerPage() {
 
   if (torrentFiles.length > 0 && !player.isPlaying) {
     const videoFiles = torrentFiles
-      .filter((f) => {
-        const ext = '.' + (f.path?.split('.').pop() || '').toLowerCase();
-        return VIDEO_EXTS.includes(ext);
-      })
-      .sort((a, b) => (b.size || 0) - (a.size || 0));
+      .filter(f => VIDEO_EXTS.some(ext => f.path.toLowerCase().endsWith(ext)))
+      .sort((a, b) => b.size - a.size);
 
     return (
-      <div className="p-6 h-full flex flex-col">
-        <button
-          onClick={() => navigate('/search')}
-          className="text-sm text-dark-textMuted hover:text-white mb-4"
-        >
-          Back to search
-        </button>
-        <h2 className="text-2xl font-bold mb-2">{torrent?.title}</h2>
-        <p className="text-dark-textMuted mb-6">Select a file to watch:</p>
-
-        <div className="space-y-2 max-w-2xl">
+      <div className="p-8 h-full flex flex-col max-w-4xl mx-auto space-y-6">
+        <div className="flex items-center justify-between">
+          <h2 className="text-2xl font-bold truncate pr-4">{torrent?.title}</h2>
+          <button onClick={() => navigate('/search')} className="text-dark-textMuted hover:text-white transition-colors">
+            Cancel
+          </button>
+        </div>
+        
+        <p className="text-dark-textMuted">This torrent contains multiple video files. Select the one you want to play:</p>
+        
+        <div className="flex-1 overflow-y-auto space-y-3 pr-2 custom-scrollbar">
           {videoFiles.map((file) => (
             <button
               key={file.id}
-              onClick={() => playFile(file)}
-              className="w-full text-left p-4 card flex justify-between items-center group hover:border-primary/50"
+              onClick={() => playFile(file, torrent)}
+              className="w-full text-left p-4 card flex justify-between items-center hover:border-primary/50 group transition-all"
             >
               <div className="min-w-0 flex-1">
-                <p className="font-medium truncate">{file.path}</p>
+                <p className="font-medium truncate group-hover:text-primary transition-colors">{file.path}</p>
                 <p className="text-sm text-dark-textMuted mt-1">
                   {(file.size / (1024 * 1024 * 1024)).toFixed(2)} GB
                 </p>
               </div>
-              <span className="text-primary opacity-0 group-hover:opacity-100 transition-opacity ml-4">
-                Play
-              </span>
+              <svg className="w-6 h-6 text-primary opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M8 5v14l11-7z"/>
+              </svg>
             </button>
           ))}
-
-          {torrentFiles.filter((f) => {
-            const ext = '.' + (f.path?.split('.').pop() || '').toLowerCase();
-            return !VIDEO_EXTS.includes(ext);
-          }).length > 0 && (
-            <div className="mt-4">
-              <p className="text-sm text-dark-textMuted mb-2">Other files in torrent:</p>
-              {torrentFiles
-                .filter((f) => {
-                  const ext = '.' + (f.path?.split('.').pop() || '').toLowerCase();
-                  return !VIDEO_EXTS.includes(ext);
-                })
-                .slice(0, 5)
-                .map((f) => (
-                  <p key={f.id} className="text-xs text-dark-textMuted px-3 py-1 truncate">
-                    {f.path} ({(f.size / (1024 * 1024)).toFixed(0)} MB)
-                  </p>
-                ))}
-            </div>
-          )}
         </div>
       </div>
     );
@@ -388,66 +347,96 @@ export default function PlayerPage() {
 
   if (player.isPlaying) {
     return (
-      <div className="h-full flex flex-col items-center justify-center">
-        <div className="text-center space-y-6">
-          <div className="w-20 h-20 mx-auto bg-primary/20 rounded-full flex items-center justify-center">
-            <svg className="w-10 h-10 text-primary" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M8 5v14l11-7z"/>
-            </svg>
-          </div>
-          
-          <div>
-            <h2 className="text-xl font-semibold">{player.currentTorrent?.title || torrent?.title}</h2>
-            {selectedFile && (
-              <p className="text-dark-textMuted mt-1">{selectedFile.path}</p>
-            )}
-          </div>
-
-          <p className="text-dark-textMuted max-w-md">
-            Video is playing in mpv window. Use mpv controls for playback.
-          </p>
-
-          <div className="flex gap-4 justify-center">
-            <button onClick={handlePause} className="btn-primary">
-              {player.isPlaying ? 'Pause' : 'Play'}
-            </button>
-            <button onClick={handleStop} className="btn-secondary">
-              Stop
-            </button>
-          </div>
-
-          {player.duration > 0 && (
-            <div className="w-96 mx-auto">
-              <input
-                type="range"
-                min={0}
-                max={player.duration}
-                step={0.1}
-                value={player.currentPosition}
-                onChange={(e) => handleSeek(Number(e.target.value))}
-                className="w-full accent-primary h-2 cursor-pointer"
-              />
-              <div className="flex justify-between text-sm text-dark-textMuted mt-1">
-                <span>{formatTime(player.currentPosition)}</span>
-                <span>{formatTime(player.duration)}</span>
+      <div className="flex h-full gap-6 p-8 overflow-hidden">
+        {/* Main Controls */}
+        <div className="flex-1 flex flex-col items-center justify-center space-y-8 min-w-0">
+          <div className="text-center space-y-4 max-w-full">
+            <div className="relative inline-block">
+              <div className="w-24 h-24 bg-primary/10 rounded-full flex items-center justify-center animate-pulse">
+                <svg className="w-12 h-12 text-primary" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M8 5v14l11-7z"/>
+                </svg>
+              </div>
+              <div className="absolute -bottom-2 -right-2 w-8 h-8 bg-green-500 rounded-full border-4 border-dark-bg flex items-center justify-center">
+                <div className="w-2 h-2 bg-white rounded-full"></div>
               </div>
             </div>
-          )}
+            
+            <div className="space-y-2">
+              <h2 className="text-2xl font-bold text-white truncate">{player.currentTorrent?.title}</h2>
+              {selectedFile && (
+                <p className="text-dark-textMuted italic truncate">
+                  Playing: {selectedFile.path.split('/').pop()}
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="card p-8 w-full max-w-2xl space-y-8 shadow-2xl">
+            <div className="space-y-3">
+              <div className="flex justify-between text-sm font-medium">
+                <span className="text-primary">{formatTime(player.currentPosition)}</span>
+                <span className="text-dark-textMuted">{formatTime(player.duration)}</span>
+              </div>
+              <div className="relative group">
+                <input
+                  type="range"
+                  min={0}
+                  max={player.duration || 100}
+                  step={0.1}
+                  value={player.currentPosition}
+                  onChange={(e) => handleSeek(Number(e.target.value))}
+                  className="w-full h-1.5 bg-dark-border rounded-full appearance-none cursor-pointer accent-primary"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-center gap-8">
+              <button 
+                onClick={handlePause}
+                className="w-16 h-16 rounded-full bg-white text-black hover:bg-primary hover:text-white transition-all flex items-center justify-center shadow-lg transform hover:scale-110 active:scale-95"
+              >
+                {player.isPlaying ? (
+                  <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+                  </svg>
+                ) : (
+                  <svg className="w-8 h-8 ml-1" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M8 5v14l11-7z"/>
+                  </svg>
+                )}
+              </button>
+              <button 
+                onClick={handleStop}
+                className="w-12 h-12 rounded-full bg-dark-border text-white hover:bg-red-500 transition-all flex items-center justify-center transform hover:scale-110 active:scale-95"
+              >
+                <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M6 6h12v12H6z"/>
+                </svg>
+              </button>
+            </div>
+
+            <p className="text-center text-sm text-dark-textMuted">
+              Use the separate mpv window for full-screen and advanced controls.
+            </p>
+          </div>
         </div>
+
+        {/* Sidebar for Subtitles */}
+        {subtitleTracks.length > 0 && (
+          <div className="w-64 flex flex-col">
+            <SubtitleSelector 
+              tracks={subtitleTracks} 
+              selectedTrack={selectedSubtitle} 
+              onSelect={handleSubtitleChange} 
+            />
+          </div>
+        )}
       </div>
     );
   }
 
-  return (
-    <div className="p-6 h-full flex items-center justify-center">
-      <div className="text-center text-dark-textMuted">
-        <p className="text-lg">No torrent selected</p>
-        <button onClick={() => navigate('/search')} className="btn-primary mt-4">
-          Search for anime
-        </button>
-      </div>
-    </div>
-  );
+  return null;
 }
 
 function formatTime(seconds: number): string {

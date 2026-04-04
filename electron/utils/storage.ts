@@ -68,12 +68,15 @@ export function addWatchEntry(entry: WatchEntry): void {
   writeJsonFile(getHistoryPath(), history);
 }
 
-export function updateWatchPosition(infohash: string, position: number): void {
+export function updateWatchPosition(infohash: string, position: number, duration?: number): void {
   const history = getWatchHistory();
   const entry = history.find((e) => e.infohash === infohash);
 
   if (entry) {
     entry.lastPosition = position;
+    if (duration !== undefined && duration > 0) {
+      entry.duration = duration;
+    }
     entry.lastWatched = new Date().toISOString();
     writeJsonFile(getHistoryPath(), history);
   }
@@ -110,8 +113,8 @@ export function registerStorageHandlers(): void {
     addWatchEntry(entry);
   });
 
-  ipcMain.handle('update-watch-position', (_event, infohash: string, position: number): void => {
-    updateWatchPosition(infohash, position);
+  ipcMain.handle('update-watch-position', (_event, infohash: string, position: number, duration?: number): void => {
+    updateWatchPosition(infohash, position, duration);
   });
 
   ipcMain.handle('remove-watch-entry', (_event, infohash: string): void => {

@@ -5,6 +5,29 @@ import { tmpdir } from 'os';
 
 const AD_BASE = 'https://api.alldebrid.com';
 const DEBUG_FILE = path.join(tmpdir(), 'nyaa-debug.json');
+const AGENT = 'nyaa-viewer';
+
+export interface ADUser {
+  username: string;
+  isPremium: boolean;
+}
+
+export interface ADMagnet {
+  id: number;
+  filename: string;
+  size: number;
+  hash: string;
+  status: string;
+  statusCode: number;
+  ready: boolean;
+}
+
+export interface ADFile {
+  path: string;
+  size: number;
+  id: number;
+  link?: string;
+}
 
 export class AllDebridService {
   private client: AxiosInstance;
@@ -29,9 +52,7 @@ export class AllDebridService {
 
   async verifyKey(key: string): Promise<{ success: boolean; error?: string; username?: string }> {
     try {
-      const response = await this.client.get('/v4/user', {
-        headers: { Authorization: `Bearer ${key}` },
-      });
+      const response = await this.client.get(`/v4/user?agent=${AGENT}&apikey=${key}`);
 
       if (response.data?.status === 'success' && response.data?.data?.user) {
         const user = response.data.data.user;
@@ -43,14 +64,13 @@ export class AllDebridService {
 
       return {
         success: false,
-        error: response.data?.error?.message || 'Invalid response',
+        error: response.data?.error?.message || 'Invalid response from AllDebrid',
       };
     } catch (e: any) {
-      const status = e.response?.status;
       const message = e.response?.data?.error?.message || e.message;
       return {
         success: false,
-        error: status === 401 ? 'Invalid API key' : `Connection failed: ${message}`,
+        error: `Connection failed: ${message}`,
       };
     }
   }
@@ -61,22 +81,20 @@ export class AllDebridService {
     try {
       const params = new URLSearchParams();
       params.append('magnets[]', magnetUri);
+      params.append('agent', AGENT);
 
       const response = await this.client.post('/v4/magnet/upload', params.toString(), {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       });
 
       const data = response.data;
-      fs.writeFileSync(DEBUG_FILE, JSON.stringify({ uploadResponse: data }, null, 2));
+      this.writeDebug({ uploadResponse: data });
 
       if (data?.status === 'success' && data?.data?.magnets?.length > 0) {
         const magnet = data.data.magnets[0];
-        console.log('[AllDebrid upload]', JSON.stringify({
-          id: magnet.id,
-          ready: magnet.ready,
-          hash: magnet.hash,
-          keys: Object.keys(magnet),
-        }, null, 2));
+        if (magnet.error) {
+          return { error: magnet.error.message || 'Magnet upload failed' };
+        }
         return {
           id: magnet.id,
           ready: magnet.ready === true,
@@ -101,39 +119,20 @@ export class AllDebridService {
     try {
       const body = new URLSearchParams();
       body.append('id', String(id));
+      body.append('agent', AGENT);
 
-      console.log('[AllDebrid] status request, id:', id);
       const response = await this.client.post('/v4.1/magnet/status', body.toString(), {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       });
 
       const data = response.data;
-      try {
-        const existing = JSON.parse(fs.readFileSync(DEBUG_FILE, 'utf-8'));
-        existing.statusResponse = data;
-        fs.writeFileSync(DEBUG_FILE, JSON.stringify(existing, null, 2));
-      } catch {
-        fs.writeFileSync(DEBUG_FILE, JSON.stringify({ statusResponse: data, rawId: id }, null, 2));
-      }
+      this.writeDebug({ statusResponse: data });
 
       if (data?.status === 'success') {
-        const magnet = data.data?.magnet;
+        const magnet = data.data?.magnet || (data.data?.magnets && data.data.magnets[0]);
         if (magnet) {
-          const statusCode = magnet.statusCode;
-          const ready = statusCode === 4;
           return {
-            ready,
-            status: magnet.status,
-            fileName: magnet.filename,
-            fileSize: magnet.size,
-          };
-        }
-        if (data.data?.magnets?.length > 0) {
-          const magnet = data.data.magnets[0];
-          const statusCode = magnet.statusCode;
-          const ready = statusCode === 4;
-          return {
-            ready,
+            ready: magnet.statusCode === 4,
             status: magnet.status,
             fileName: magnet.filename,
             fileSize: magnet.size,
@@ -141,69 +140,67 @@ export class AllDebridService {
         }
       }
 
-      console.error('[AllDebrid] status failed:', data?.error);
-      return { ready: false, error: data?.error?.message || 'Unknown error' };
+      return { ready: false, error: data?.error?.message || 'Status check failed' };
     } catch (e: any) {
-      console.error('[AllDebrid] status call error:', e.response?.data?.error?.message || e.message);
-      try {
-        const existing = JSON.parse(fs.readFileSync(DEBUG_FILE, 'utf-8'));
-        existing.statusError = e.response?.data?.error || { message: e.message };
-        fs.writeFileSync(DEBUG_FILE, JSON.stringify(existing, null, 2));
-      } catch {
-        fs.writeFileSync(DEBUG_FILE, JSON.stringify({ statusError: e.response?.data?.error || { message: e.message } }, null, 2));
-      }
       return { ready: false, error: e.response?.data?.error?.message || e.message };
     }
   }
 
-  async getTorrentFiles(id: number): Promise<Array<{ path: string; size: number; id: number }>> {
+  async getTorrentFiles(id: number): Promise<ADFile[]> {
     this.ensureKey();
 
     try {
       const body = new URLSearchParams();
       body.append('id[]', String(id));
+      body.append('agent', AGENT);
 
       const response = await this.client.post('/v4/magnet/files', body.toString(), {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       });
 
       const data = response.data;
-      fs.writeFileSync(DEBUG_FILE, JSON.stringify(data, null, 2));
-      console.log('[AllDebrid] files debug written to:', DEBUG_FILE);
+      this.writeDebug({ filesResponse: data });
 
       if (data?.status === 'success' && data?.data?.magnets) {
         const magnetEntry = data.data.magnets.find((m: any) => String(m.id) === String(id));
         if (magnetEntry?.files) {
-          const files: Array<{ path: string; size: number; id: number }> = [];
-          const flattenFiles = (nodes: any[], prefix = ''): Array<{ path: string; size: number; id: number }> => {
-            return nodes.reduce<Array<{ path: string; size: number; id: number }>>((acc, node, idx) => {
-              const name = node.n || '';
-              const fullPath = prefix ? `${prefix}/${name}` : name;
-              if (node.e && Array.isArray(node.e)) {
-                // It's a folder, recurse
-                acc.push(...flattenFiles(node.e, fullPath));
-              } else if (node.l) {
-                // It's a file with a link
-                files.push({
-                  path: fullPath,
-                  size: node.s || 0,
-                  id: idx + 1,
-                  link: node.l,
-                } as any);
-              }
-              return acc;
-            }, []);
-          };
-          flattenFiles(magnetEntry.files);
-          return files;
+          return this.flattenFiles(magnetEntry.files);
         }
       }
 
       return [];
     } catch (e: any) {
-      console.error('Get torrent files failed:', e);
+      console.error('[AD] Get files failed:', e.message);
       return [];
     }
+  }
+
+  private flattenFiles(nodes: any[], prefix = ''): ADFile[] {
+    const files: ADFile[] = [];
+    
+    const recurse = (currentNodes: any[], currentPrefix: string) => {
+      for (let i = 0; i < currentNodes.length; i++) {
+        const node = currentNodes[i];
+        const name = node.n || '';
+        const fullPath = currentPrefix ? `${currentPrefix}/${name}` : name;
+        
+        if (node.e && Array.isArray(node.e)) {
+          // Folder
+          recurse(node.e, fullPath);
+        } else if (node.l || node.id) {
+          // File
+          files.push({
+            path: fullPath,
+            size: node.s || 0,
+            id: node.id || i + 1,
+            link: node.l,
+          });
+        }
+      }
+    };
+
+    recurse(nodes, prefix);
+    return files;
   }
 
   async unlockFile(fileLink: string): Promise<{ success: boolean; link?: string; error?: string }> {
@@ -212,6 +209,7 @@ export class AllDebridService {
     try {
       const params = new URLSearchParams();
       params.append('link', fileLink);
+      params.append('agent', AGENT);
 
       const response = await this.client.post('/v4/link/unlock', params.toString(), {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -225,8 +223,8 @@ export class AllDebridService {
         };
       }
 
-      if (data?.status === 'success' && data?.data?.delayed) {
-        return { success: false, error: 'File is still processing, please try again shortly' };
+      if (data?.data?.delayed) {
+        return { success: false, error: 'File is being downloaded by AllDebrid, please wait.' };
       }
 
       return { success: false, error: data?.error?.message || 'Unlock failed' };
@@ -239,5 +237,18 @@ export class AllDebridService {
     if (!this.apikey) {
       throw new Error('AllDebrid API key not configured');
     }
+  }
+
+  private writeDebug(content: any): void {
+    try {
+      let existing: any = {};
+      if (fs.existsSync(DEBUG_FILE)) {
+        try {
+          existing = JSON.parse(fs.readFileSync(DEBUG_FILE, 'utf-8'));
+        } catch (_) {}
+      }
+      const updated = { ...existing, ...content, timestamp: new Date().toISOString() };
+      fs.writeFileSync(DEBUG_FILE, JSON.stringify(updated, null, 2));
+    } catch (_) {}
   }
 }

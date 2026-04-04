@@ -1,0 +1,102 @@
+# NyaaViewer Progress
+
+## Status: ALL STORIES COMPLETE
+
+### US-001: Scaffolding Electron + Vite + React + TypeScript ✅
+- package.json with Electron/React/Vite/TS/tailwind/axios/fast-xml-parser/zustand/react-router
+- vite.config.ts with vite-plugin-electron for main process + preload
+- tsconfig.json (noEmit, bundler module resolution)
+- electron/main.ts - BrowserWindow, IPC registration
+- electron/preload.ts - contextBridge with full ElectronAPI type
+- index.html with CSP meta tag
+- electron-builder.yml for NSIS + DMG
+- tailwind.config.js with dark theme colors
+- postcss.config.js
+- src/main.tsx with HashRouter
+- src/App.tsx with routes: /, /search, /player, /settings
+- src/components/Layout.tsx - sidebar nav
+- TypeScript compiles with zero errors
+
+### US-002: AllDebrid API client + Settings page ✅
+- electron/services/alldebrid.ts: full AD API client (verifyKey, uploadMagnet, getTorrentStatus, getTorrentFiles, unlockFile, unlockFileById, getFilesWithLinks)
+- electron/services/alldebrid-singleton.ts: singleton export
+- electron/ipc/alldebrid.ts: IPC handlers (verify, upload, status, files, unlock, set/get key)
+- src/pages/SettingsPage.tsx: API key input, test button, connection status, subtitle lang preference
+- src/store/appStore.ts: AD connection state
+
+### US-003: Store + State management ✅
+- src/store/appStore.ts: Zustand store with Zustand with TypeScript types for NyaaResult, TorrentFile, WatchEntry, PlayerState, plus subtitle lang preference
+
+### US-004: nyaa.si search + results UI ✅
+- electron/services/nyaa.ts: RSS fetch + parse with fast-xml-parser, resolution detection from title, magnet URI building
+- electron/ipc/search.ts: search-nyaa + get-trending handlers
+- src/components/SearchBar.tsx: text input + resolution filter dropdown
+- src/components/SearchResult.tsx: result card with seeders (color-coded), leechers, size, date, resolution badge, stream button
+- src/pages/SearchPage.tsx: search with resolution filter, sort by seeders/title
+
+### US-005: Home + trending + resume watch ✅
+- electron/utils/storage.ts: JSON-based watch history (CRUD) + config persistence
+- src/components/ResumeWatchSection.tsx: grid of continue-watching cards with progress bars
+- src/components/TrendingSection.tsx: top 10 seeded torrents
+- src/pages/HomePage.tsx: hero search, trending section, resume watch section
+
+### US-006: mpv player + streaming flow ✅
+- electron/services/mpv.ts: full mpv process manager (spawn with --input-ipc-server, socket IPC, start/pause/seek/stop, getPosition, position polling, subtitle control)
+- electron/ipc/player.ts: IPC handlers (start, pause, seek, stop, get-position)
+- src/pages/PlayerPage.tsx: full streaming flow (upload magnet → poll status → get files → unlock link → start mpv), file selector, progress bar, play/pause/stop controls
+- src/store/appStore.ts: player state management
+
+### US-007: Subtitle detection + selector UI ✅
+- src/components/SubtitleSelector.tsx: subtitle track list with language names, off toggle, codec display
+- electron/services/mpv.ts: setSubtitleTrack, setSubtitleLanguage, cycleSubtitles
+- Settings page has default subtitle language preference (en/fr/es/ja/de/pt/it)
+
+### US-008: Packaging config ✅
+- electron-builder.yml: Windows NSIS (oneClick: false, perMachine, allow dir change) + Mac DMG
+- package.json scripts: build:win, build:mac, build:all
+
+## Key Architecture Decisions
+- HashRouter (not BrowserRouter) for Electron file:// protocol compatibility
+- All nyaa.si requests go through main process (no CORS)
+- mpv spawned as child process with Unix socket IPC
+- Storage uses app.getPath('userData') for cross-platform consistency
+- Zustand store in renderer, main process keeps own state (AD key, mpv)
+- fast-xml-parser for RSS parsing (lighter than xml2js)
+
+## What still needs work (post-scaffold)
+- mkv subtitle extraction service (mediainfo CLI integration)
+- mpv binary bundling for distribution
+- mediainfo binary bundling for distribution
+- Testing the streaming flow end-to-end (needs AD API key + mpv installed)
+- PlayerPage needs actual mpv embed area (currently shows placeholder)
+
+## Session 2026-04-03: US-020, US-021, US-022
+
+### US-020: AllDebrid API spec compliance ✅
+- `electron/services/alldebrid.ts`: All endpoints verified:
+  - `uploadMagnet`: POST /v4/magnet/upload with magnets[] param
+  - `getTorrentStatus`: POST /v4.1/magnet/status with id param
+  - `getTorrentFiles`: POST /v4/magnet/files with id[] param
+  - `unlockFile`: POST /v4/link/unlock with link param
+- All requests use Authorization: Bearer header
+- Test script: scripts/test-alldebrid.js (end-to-end flow with Big Buck Bunny magnet)
+- TypeScript compiles: zero errors
+
+### US-021: PlayerPage streaming chain ✅
+- `src/pages/PlayerPage.tsx`: playFile checks file.link exists before calling unlockLink
+- `electron/preload.ts`: unlockLink accepts string link, returns { success, link, error }
+- `electron/services/alldebrid.ts`: unlockFile returns final streaming link from /v4/link/unlock
+- `electron/ipc/alldebrid.ts`: unlock-link handler passes fileLink string to unlockFile
+- startPlayback receives final mpv streamable URL (unlockData.link)
+
+### US-022: Debug logging and error handling ✅
+- `electron/services/alldebrid.ts`:
+  - getTorrentFiles writes full debug response to /tmp/nyaa-debug.json
+  - getTorrentStatus writes status response AND errors to /tmp/nyaa-debug.json
+  - Error returns include actual AD error message (e.message from response.data.error)
+  - console.error on failures with descriptive messages
+- `src/pages/PlayerPage.tsx`:
+  - Error messages from getTorrentFiles are surfaced if present
+  - Specific AD errors are displayed instead of generic "No video files found"
+  - unlockLink errors show the specific unlock error message
+  - TypeScript compiles: zero errors

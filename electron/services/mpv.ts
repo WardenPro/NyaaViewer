@@ -19,6 +19,9 @@ export class MpvService {
   private ipcPath: string = '';
   private isPlaying = false;
   private events: MpvEvents = {};
+  private messageBuffer = '';
+  private pendingRequests = new Map<number, (data: any) => void>();
+  private requestId = 1;
 
   async startPlayback(url: string): Promise<{ success: boolean; error?: string }> {
     try {
@@ -27,11 +30,18 @@ export class MpvService {
       const mpvPath = getMpvPath();
       console.log('[mpv] Starting:', mpvPath);
 
+      // Verify binary exists if it's an absolute path
+      if (path.isAbsolute(mpvPath) && !fs.existsSync(mpvPath)) {
+        return { success: false, error: `mpv binary not found at ${mpvPath}` };
+      }
+
       const tmpDir = path.join(os.tmpdir(), 'nyaa-viewer');
       if (!fs.existsSync(tmpDir)) {
         fs.mkdirSync(tmpDir, { recursive: true });
       }
-      this.ipcPath = path.join(tmpDir, 'mpv-ipc-' + Date.now() + '.sock');
+
+      // Use a more unique socket path to avoid collisions
+      this.ipcPath = path.join(tmpDir, `mpv-ipc-${Date.now()}-${Math.floor(Math.random() * 1000)}.sock`);
 
       const args: string[] = [
         url,
@@ -53,42 +63,154 @@ export class MpvService {
         stdio: ['ignore', 'pipe', 'pipe'],
       });
 
+      // Handle stdout/stderr to prevent buffer issues
+      this.mpvProcess.stdout?.on('data', (data) => {
+        // Just drain stdout
+      });
+
       this.mpvProcess.stderr?.on('data', (data) => {
         const msg = data.toString().trim();
-        if (msg) {
-          console.log('[mpv stderr]', msg);
-        }
+        if (msg) console.log('[mpv stderr]', msg);
       });
 
-      this.mpvProcess.on('error', (err) => {
-        console.error('[mpv] error:', err);
-        this.events.onError?.(err.message);
-      });
-
-      this.mpvProcess.on('exit', (code) => {
-        console.log('[mpv] exited:', code);
-        this.isPlaying = false;
-        if (code !== 0) {
-          this.events.onError?.('mpv exited with code ' + code);
-        }
-        this.events.onEnded?.();
-      });
-
-      await this.waitForSocket(30000);
-      await this.connectIpc();
+      // Wait for socket to be ready with retries
+      await this.connectToIpc(30000);
 
       this.isPlaying = true;
       this.events.onReady?.();
-      this.startPolling();
+
+      // Setup process monitoring
+      this.mpvProcess.on('exit', (code) => {
+        console.log('[mpv] exited with code:', code);
+        this.cleanup();
+        this.events.onEnded?.();
+      });
+
+      this.mpvProcess.on('error', (err) => {
+        console.error('[mpv] process error:', err);
+        this.events.onError?.(err.message);
+      });
 
       return { success: true };
     } catch (e: any) {
+      console.error('[mpv] Start failed:', e);
+      this.cleanup();
       return { success: false, error: e.message };
     }
   }
 
-  setEvents(events: MpvEvents): void {
-    this.events = events;
+  private async connectToIpc(timeoutMs: number): Promise<void> {
+    const start = Date.now();
+    let attempt = 1;
+
+    return new Promise((resolve, reject) => {
+      const tryConnect = () => {
+        if (Date.now() - start > timeoutMs) {
+          return reject(new Error('IPC timeout: mpv failed to create socket in time'));
+        }
+
+        // Check if process is still alive
+        if (this.mpvProcess?.exitCode !== null && this.mpvProcess?.exitCode !== undefined) {
+          return reject(new Error(`mpv exited prematurely with code ${this.mpvProcess.exitCode}`));
+        }
+
+        const socket = net.createConnection(this.ipcPath);
+
+        socket.on('connect', () => {
+          console.log('[mpv] Connected to IPC socket after', attempt, 'attempts');
+          this.ipcSocket = socket;
+          this.setupSocketHandlers();
+          resolve();
+        });
+
+        socket.on('error', () => {
+          socket.destroy();
+          attempt++;
+          setTimeout(tryConnect, 200); // Retry every 200ms
+        });
+      };
+
+      tryConnect();
+    });
+  }
+
+  private setupSocketHandlers(): void {
+    if (!this.ipcSocket) return;
+
+    this.ipcSocket.on('data', (data) => {
+      this.messageBuffer += data.toString();
+      const lines = this.messageBuffer.split('\n');
+      this.messageBuffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const msg = JSON.parse(line);
+          this.handleIpcMessage(msg);
+        } catch (e) {
+          console.error('[mpv] Error parsing IPC message:', e, 'Line:', line);
+        }
+      }
+    });
+
+    this.ipcSocket.on('close', () => {
+      console.log('[mpv] IPC socket closed');
+      this.cleanup();
+    });
+
+    // Start periodic status updates
+    this.startStatusPolling();
+  }
+
+  private handleIpcMessage(msg: any): void {
+    if (msg.event) {
+      this.handleEvent(msg);
+    } else if (msg.request_id !== undefined) {
+      const resolve = this.pendingRequests.get(msg.request_id);
+      if (resolve) {
+        this.pendingRequests.delete(msg.request_id);
+        resolve(msg);
+      }
+    }
+  }
+
+  private handleEvent(msg: any): void {
+    switch (msg.event) {
+      case 'end-file':
+        this.isPlaying = false;
+        this.events.onEnded?.();
+        break;
+      // Add more event handlers as needed
+    }
+  }
+
+  private startStatusPolling(): void {
+    const poll = async () => {
+      if (!this.isPlaying || !this.ipcSocket) return;
+
+      try {
+        const [pos, dur, tracks] = await Promise.all([
+          this.getProperty('time-pos'),
+          this.getProperty('duration'),
+          this.getProperty('track-list')
+        ]);
+
+        this.events.onPositionUpdate?.({
+          position: pos || 0,
+          duration: dur || 0
+        });
+
+        if (tracks && Array.isArray(tracks)) {
+          const subs = tracks.filter((t: any) => t.type === 'sub');
+          this.events.onTracks?.(subs);
+        }
+      } catch (_) {}
+
+      if (this.isPlaying) {
+        setTimeout(poll, 1000);
+      }
+    };
+    poll();
   }
 
   async pause(): Promise<void> {
@@ -101,138 +223,78 @@ export class MpvService {
 
   async stop(): Promise<void> {
     if (this.ipcSocket) {
-      try {
-        await this.sendCommand(['quit']);
-      } catch (_) {}
+      try { await this.sendCommand(['quit']); } catch (_) {}
+    }
+    this.cleanup();
+  }
+
+  async setSubtitleTrack(trackId: string | number): Promise<void> {
+    const sid = (trackId === 'no' || trackId === -1 || trackId === '') ? 'no' : String(trackId);
+    await this.sendCommand(['set', 'sid', sid]);
+  }
+
+  async getTracks(): Promise<any[]> {
+    const tracks = await this.getProperty('track-list');
+    return Array.isArray(tracks) ? tracks : [];
+  }
+
+  async getPosition(): Promise<{ position: number; duration: number }> {
+    const [pos, dur] = await Promise.all([
+      this.getProperty('time-pos'),
+      this.getProperty('duration')
+    ]);
+    return { position: pos || 0, duration: dur || 0 };
+  }
+
+  private async sendCommand(cmd: string[]): Promise<any> {
+    if (!this.ipcSocket) throw new Error('Not connected to mpv IPC');
+
+    const requestId = this.requestId++;
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pendingRequests.delete(requestId);
+        reject(new Error(`Command timeout: ${cmd.join(' ')}`));
+      }, 5000);
+
+      this.pendingRequests.set(requestId, (data) => {
+        clearTimeout(timeout);
+        if (data.error && data.error !== 'success') {
+          reject(new Error(`mpv error: ${data.error}`));
+        } else {
+          resolve(data.data);
+        }
+      });
+
+      const msg = JSON.stringify({ command: cmd, request_id: requestId }) + '\n';
+      this.ipcSocket!.write(msg);
+    });
+  }
+
+  private async getProperty(name: string): Promise<any> {
+    return this.sendCommand(['get_property', name]);
+  }
+
+  private cleanup(): void {
+    this.isPlaying = false;
+    this.pendingRequests.clear();
+    
+    if (this.ipcSocket) {
       this.ipcSocket.destroy();
       this.ipcSocket = null;
     }
 
     if (this.mpvProcess) {
-      this.mpvProcess.kill('SIGTERM');
+      this.mpvProcess.kill('SIGKILL');
       this.mpvProcess = null;
     }
 
     if (this.ipcPath && fs.existsSync(this.ipcPath)) {
       try { fs.unlinkSync(this.ipcPath); } catch (_) {}
     }
-
-    this.isPlaying = false;
   }
 
-  async setSubtitleTrack(trackId: string | number): Promise<void> {
-    if (trackId === '' || trackId === -1 || trackId === 'no') {
-      await this.sendCommand(['set', 'sid', 'no']);
-    } else {
-      await this.sendCommand(['set', 'sid', String(trackId)]);
-    }
-  }
-
-  async getTracks(): Promise<any[]> {
-    try {
-      const tracks = await this.getProperty('track-list');
-      return tracks || [];
-    } catch (_) {
-      return [];
-    }
-  }
-
-  async getPosition(): Promise<{ position: number; duration: number }> {
-    try {
-      const pos = await this.getProperty('time-pos');
-      const dur = await this.getProperty('duration');
-      return { position: pos || 0, duration: dur || 0 };
-    } catch (_) {
-      return { position: 0, duration: 0 };
-    }
-  }
-
-  private async sendCommand(cmd: string[]): Promise<void> {
-    if (!this.ipcSocket) return;
-
-    return new Promise((resolve, reject) => {
-      const data = JSON.stringify({ command: cmd, id: Date.now() }) + '\n';
-      this.ipcSocket!.write(data, (err) => {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
-  }
-
-  private async getProperty(name: string): Promise<any> {
-    if (!this.ipcSocket) return null;
-
-    return new Promise((resolve, reject) => {
-      const id = Date.now();
-      const handler = (data: Buffer) => {
-        try {
-          const msg = JSON.parse(data.toString().trim());
-          if (msg.id === id) {
-            this.ipcSocket?.removeListener('data', handler);
-            resolve(msg.data);
-          }
-        } catch (_) {}
-      };
-
-      this.ipcSocket?.on('data', handler);
-      this.ipcSocket?.write(JSON.stringify({ command: ['get_property', name], id }) + '\n');
-
-      setTimeout(() => {
-        this.ipcSocket?.removeListener('data', handler);
-        reject(new Error('timeout'));
-      }, 5000);
-    });
-  }
-
-  private waitForSocket(timeout = 10000): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const start = Date.now();
-      const check = () => {
-        if (fs.existsSync(this.ipcPath)) resolve();
-        else if (Date.now() - start > timeout) reject(new Error('IPC timeout'));
-        else setTimeout(check, 100);
-      };
-      check();
-    });
-  }
-
-  private async connectIpc(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const socket = net.createConnection(this.ipcPath);
-      socket.on('connect', () => {
-        this.ipcSocket = socket;
-        resolve();
-      });
-      socket.on('error', reject);
-      socket.setTimeout(5000);
-    });
-  }
-
-  private startPolling(): void {
-    const poll = async () => {
-      if (!this.isPlaying || !this.ipcSocket) return;
-
-      try {
-        const pos = await this.getProperty('time-pos');
-        const dur = await this.getProperty('duration');
-        const tracks = await this.getProperty('track-list');
-
-        this.events.onPositionUpdate?.({
-          position: pos || 0,
-          duration: dur || 0
-        });
-
-        if (tracks && tracks.length > 0) {
-          const subs = tracks.filter((t: any) => t.type === 'sub');
-          if (subs.length > 0) {
-            this.events.onTracks?.(subs);
-          }
-        }
-      } catch (_) {}
-
-      setTimeout(poll, 1000);
-    };
-    poll();
+  setEvents(events: MpvEvents): void {
+    this.events = events;
   }
 }
 

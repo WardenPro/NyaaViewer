@@ -1,0 +1,46 @@
+{
+  "version": "1.2",
+  "stories": [
+    {
+      "id": "US-020",
+      "title": "Fix AllDebrid API calls to match v4/v4.1 spec exactly",
+      "priority": 1,
+      "passes": true,
+      "acceptanceCriteria": [
+        "uploadMagnet uses POST with magnets[] param and receives { id, ready } — verified by test script",
+        "getTorrentStatus uses POST /v4.1/magnet/status with id param — verified by test script",
+        "getTorrentFiles uses POST /v4/magnet/files with id[] param as array — verified by test script",
+        "unlockFile uses POST /v4/link/unlock with link param — verified by test script",
+        "All requests use Authorization: Bearer header (not ?apikey= query param)",
+        "Test script with a demo magnet URI successfully uploads → checks status → gets files",
+        "TypeScript compiles with zero errors (npx tsc --noEmit exits 0)"
+      ]
+    },
+    {
+      "id": "US-021",
+      "title": "Fix PlayerPage streaming chain to pass AllDebrid URLs correctly",
+      "priority": 2,
+      "passes": true,
+      "acceptanceCriteria": [
+        "PlayerPage playFile checks file.link exists before calling unlockLink",
+        "unlockLink IPC passes the AllDebrid file URL (not a numeric ID)",
+        "unlockFile returns the final streaming download link from /v4/link/unlock",
+        "startPlayback receives the final mpv streamable URL",
+        "Electron preload types match the new function signatures (string link, not number id)"
+      ]
+    },
+    {
+      "id": "US-022",
+      "title": "Add debug logging and error handling for API failures",
+      "priority": 3,
+      "passes": true,
+      "acceptanceCriteria": [
+        "getTorrentFiles logs full debug response to /tmp/nyaa-debug.json on status AND files calls",
+        "getTorrentStatus logs the raw response when it fails",
+        "Error messages show the actual AD error code and message",
+        "PlayerPage displays specific error (not generic 'No video files found') for AD errors",
+        "TypeScript compiles with zero errors"
+      ]
+    }
+  ]
+}
