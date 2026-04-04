@@ -63,6 +63,18 @@ export class MpvService {
           detached: false,
           stdio: ['ignore', 'pipe', 'pipe'],
         });
+
+        // Setup process monitoring IMMEDIATELY to catch early errors
+        this.mpvProcess.on('exit', (code) => {
+          console.log('[mpv] exited with code:', code);
+          this.cleanup();
+          this.events.onEnded?.();
+        });
+
+        this.mpvProcess.on('error', (err) => {
+          console.error('[mpv] process error:', err);
+          this.events.onError?.(err.message);
+        });
       } catch (spawnError: any) {
         console.error('[mpv] spawn error:', spawnError);
         return { success: false, error: `Failed to spawn mpv: ${spawnError.message}` };
@@ -83,18 +95,6 @@ export class MpvService {
 
       this.isPlaying = true;
       this.events.onReady?.();
-
-      // Setup process monitoring
-      this.mpvProcess.on('exit', (code) => {
-        console.log('[mpv] exited with code:', code);
-        this.cleanup();
-        this.events.onEnded?.();
-      });
-
-      this.mpvProcess.on('error', (err) => {
-        console.error('[mpv] process error:', err);
-        this.events.onError?.(err.message);
-      });
 
       return { success: true };
     } catch (e: any) {

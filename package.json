@@ -1,6 +1,6 @@
 {
   "name": "nyaa-viewer",
-  "version": "1.3.3",
+  "version": "1.3.4",
   "description": "Nyaa.si anime torrent viewer with AllDebrid streaming",
   "main": "dist-electron/main.js",
   "scripts": {

@@ -35,8 +35,19 @@ export function getMpvPath(): string {
     return bundled;
   }
 
-  // Fallback to system PATH
-  console.log('[binaries] Bundled mpv not found, falling back to system PATH');
+  // Fallback to system PATH: try to find absolute path on Unix
+  if (!isWin) {
+    try {
+      const { execSync } = require('child_process');
+      const absolutePath = execSync('which mpv').toString().trim();
+      if (absolutePath && fs.existsSync(absolutePath)) {
+        console.log('[binaries] Found system mpv at:', absolutePath);
+        return absolutePath;
+      }
+    } catch (_) {}
+  }
+
+  console.log('[binaries] Bundled mpv not found, falling back to "mpv" command');
   return binaryName;
 }
 
@@ -46,10 +57,27 @@ export function getMpvPath(): string {
  */
 export function getMediainfoPath(): string {
   const binDir = getBinDir();
-  const bundled = path.join(binDir, isWin ? 'mediainfo.exe' : 'mediainfo');
-  if (fs.existsSync(bundled)) return bundled;
-  // Fallback to system PATH
-  return 'mediainfo';
+  const binaryName = isWin ? 'mediainfo.exe' : 'mediainfo';
+  const bundled = path.join(binDir, binaryName);
+
+  if (fs.existsSync(bundled)) {
+    console.log('[binaries] Using bundled mediainfo:', bundled);
+    return bundled;
+  }
+
+  // Try to find absolute path on Unix
+  if (!isWin) {
+    try {
+      const { execSync } = require('child_process');
+      const absolutePath = execSync('which mediainfo').toString().trim();
+      if (absolutePath && fs.existsSync(absolutePath)) {
+        console.log('[binaries] Found system mediainfo at:', absolutePath);
+        return absolutePath;
+      }
+    } catch (_) {}
+  }
+
+  return binaryName;
 }
 
 /**
