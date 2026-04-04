@@ -58,10 +58,15 @@ export class MpvService {
 
       console.log('[mpv] Args:', args.join(' '));
 
-      this.mpvProcess = spawn(mpvPath, args, {
-        detached: false,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
+      try {
+        this.mpvProcess = spawn(mpvPath, args, {
+          detached: false,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+      } catch (spawnError: any) {
+        console.error('[mpv] spawn error:', spawnError);
+        return { success: false, error: `Failed to spawn mpv: ${spawnError.message}` };
+      }
 
       // Handle stdout/stderr to prevent buffer issues
       this.mpvProcess.stdout?.on('data', (data) => {

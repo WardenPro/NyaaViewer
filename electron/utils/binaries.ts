@@ -27,15 +27,21 @@ function getBinDir(): string {
  */
 export function getMpvPath(): string {
   const binDir = getBinDir();
-  console.log('[binaries] binDir:', binDir);
   
-  const bundled = path.join(binDir, isWin ? 'mpv.exe' : 'mpv');
-  console.log('[binaries] checking:', bundled);
-  console.log('[binaries] exists:', fs.existsSync(bundled));
+  // Try standard name
+  const standard = path.join(binDir, isWin ? 'mpv.exe' : 'mpv');
+  if (fs.existsSync(standard)) {
+    console.log('[binaries] Using bundled mpv:', standard);
+    return standard;
+  }
   
-  if (fs.existsSync(bundled)) {
-    console.log('[binaries] Using bundled mpv:', bundled);
-    return bundled;
+  // Try .exe name even on non-Windows (fallback for dev environments)
+  if (!isWin) {
+    const exeFallback = path.join(binDir, 'mpv.exe');
+    if (fs.existsSync(exeFallback)) {
+      console.log('[binaries] Using bundled mpv.exe (fallback):', exeFallback);
+      return exeFallback;
+    }
   }
   
   // Fallback to system PATH
