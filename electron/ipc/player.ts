@@ -33,8 +33,7 @@ export function registerPlayerHandlers(): void {
 
   ipcMain.handle('start-playback', async (_event, url: string) => {
     try {
-      const wid = videoWindow.getWindowId();
-      return await mpvService.startPlayback(url, wid || undefined);
+      return await mpvService.startPlayback(url);
     } catch (e: any) {
       return { success: false, error: e.message };
     }

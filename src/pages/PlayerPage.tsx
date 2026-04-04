@@ -46,11 +46,7 @@ export default function PlayerPage() {
   const videoAreaRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    window.electronAPI.setupVideoWindow();
-    return () => {
-      window.electronAPI.stopPlayback();
-      window.electronAPI.hideVideoWindow();
-    };
+    window.electronAPI.stopPlayback();
   }, []);
 
   useEffect(() => {
@@ -58,30 +54,6 @@ export default function PlayerPage() {
       startTorrentFlow(torrent);
     }
   }, [torrent?.infohash]);
-
-  useEffect(() => {
-    if (!player.isPlaying) return;
-
-    const reposition = () => {
-      if (videoAreaRef.current) {
-        const rect = videoAreaRef.current.getBoundingClientRect();
-        window.electronAPI.showVideoWindow({
-          x: rect.left,
-          y: rect.top,
-          width: rect.width,
-          height: rect.height,
-        });
-      }
-    };
-
-    const observer = new ResizeObserver(reposition);
-    if (videoAreaRef.current) {
-      observer.observe(videoAreaRef.current);
-    }
-
-    reposition();
-    return () => observer.disconnect();
-  }, [player.isPlaying]);
 
   useEffect(() => {
     const posHandler = (data: { position: number; duration: number }) => {
@@ -416,76 +388,51 @@ export default function PlayerPage() {
 
   if (player.isPlaying) {
     return (
-      <div className="h-full flex flex-col">
-        <div className="flex items-center justify-between px-6 py-3 border-b border-dark-border bg-dark-card">
-          <div className="min-w-0 flex-1">
-            <p className="font-medium truncate">{player.currentTorrent?.title || torrent?.title}</p>
+      <div className="h-full flex flex-col items-center justify-center">
+        <div className="text-center space-y-6">
+          <div className="w-20 h-20 mx-auto bg-primary/20 rounded-full flex items-center justify-center">
+            <svg className="w-10 h-10 text-primary" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M8 5v14l11-7z"/>
+            </svg>
+          </div>
+          
+          <div>
+            <h2 className="text-xl font-semibold">{player.currentTorrent?.title || torrent?.title}</h2>
             {selectedFile && (
-              <p className="text-xs text-dark-textMuted truncate">{selectedFile.path}</p>
+              <p className="text-dark-textMuted mt-1">{selectedFile.path}</p>
             )}
           </div>
-          <div className="flex gap-2 ml-4">
-            <button onClick={handlePause} className="btn-secondary text-sm py-1 px-3">
+
+          <p className="text-dark-textMuted max-w-md">
+            Video is playing in mpv window. Use mpv controls for playback.
+          </p>
+
+          <div className="flex gap-4 justify-center">
+            <button onClick={handlePause} className="btn-primary">
               {player.isPlaying ? 'Pause' : 'Play'}
             </button>
-            <button onClick={handleStop} className="btn-secondary text-sm py-1 px-3">
+            <button onClick={handleStop} className="btn-secondary">
               Stop
             </button>
           </div>
-        </div>
 
-        <div className="flex-1 flex overflow-hidden">
-          <div className="flex-1 flex flex-col">
-            <div
-              ref={videoAreaRef}
-              className="flex-1 bg-black relative"
-            />
-
-            {player.duration > 0 && player.duration < Infinity && (
-              <div className="px-6 py-3 bg-dark-card border-t border-dark-border">
-                <input
-                  type="range"
-                  min={0}
-                  max={player.duration}
-                  step={0.1}
-                  value={player.currentPosition}
-                  onChange={(e) => handleSeek(Number(e.target.value))}
-                  className="w-full accent-primary h-2 cursor-pointer"
-                />
-                <div className="flex justify-between text-xs text-dark-textMuted mt-1">
-                  <span>{formatTime(player.currentPosition)}</span>
-                  <span>{formatTime(player.duration)}</span>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="w-72 bg-dark-card border-l border-dark-border p-4 space-y-6 overflow-y-auto">
-            <div>
-              <SubtitleSelector
-                tracks={subtitleTracks.map((t) => ({
-                  id: String(t.id),
-                  language: t.language,
-                  codec: t.codec,
-                }))}
-                selectedTrack={selectedSubtitle}
-                onSelect={handleSubtitleChange}
+          {player.duration > 0 && (
+            <div className="w-96 mx-auto">
+              <input
+                type="range"
+                min={0}
+                max={player.duration}
+                step={0.1}
+                value={player.currentPosition}
+                onChange={(e) => handleSeek(Number(e.target.value))}
+                className="w-full accent-primary h-2 cursor-pointer"
               />
-              <p className="text-xs text-dark-textMuted mt-2">
-                Subtitles are embedded in the video stream when available.
-              </p>
-            </div>
-
-            {selectedFile && (
-              <div className="card space-y-1">
-                <p className="text-sm font-semibold">File Info</p>
-                <p className="text-xs text-dark-textMuted truncate">{selectedFile.path}</p>
-                <p className="text-xs text-dark-textMuted">
-                  {(selectedFile.size / (1024 * 1024 * 1024)).toFixed(2)} GB
-                </p>
+              <div className="flex justify-between text-sm text-dark-textMuted mt-1">
+                <span>{formatTime(player.currentPosition)}</span>
+                <span>{formatTime(player.duration)}</span>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
     );

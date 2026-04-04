@@ -20,23 +20,12 @@ export class MpvService {
   private isPlaying = false;
   private events: MpvEvents = {};
 
-  async startPlayback(url: string, windowId?: string | number): Promise<{ success: boolean; error?: string }> {
+  async startPlayback(url: string): Promise<{ success: boolean; error?: string }> {
     try {
       await this.stop();
 
       const mpvPath = getMpvPath();
-      
-      // Check if mpv exists
-      if (!fs.existsSync(mpvPath)) {
-        const whichCmd = process.platform === 'win32' ? 'where' : 'which';
-        const { execSync } = require('child_process');
-        try {
-          const result = execSync(whichCmd + ' mpv', { encoding: 'utf8' });
-          console.log('[mpv] Found in PATH:', result.trim());
-        } catch {
-          return { success: false, error: 'mpv not found. Please install mpv.' };
-        }
-      }
+      console.log('[mpv] Starting:', mpvPath);
 
       const tmpDir = path.join(os.tmpdir(), 'nyaa-viewer');
       if (!fs.existsSync(tmpDir)) {
@@ -54,24 +43,9 @@ export class MpvService {
         '--sub-auto=fuzzy',
         '--ytdl=no',
         '--hwdec=auto',
+        '--force-window=yes',
       ];
 
-      if (windowId !== undefined) {
-        args.push('--wid=' + String(windowId));
-        args.push('--force-window=immediate');
-        args.push('--no-border');
-        args.push('--no-keepaspect');
-        args.push('--vo=gpu');
-        if (process.platform === 'win32') {
-          args.push('--gpu-context=angle');
-        } else {
-          args.push('--gpu-context=x11');
-        }
-      } else {
-        args.push('--force-window=yes');
-      }
-
-      console.log('[mpv] Starting:', mpvPath);
       console.log('[mpv] Args:', args.join(' '));
 
       this.mpvProcess = spawn(mpvPath, args, {
