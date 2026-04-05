@@ -13,6 +13,8 @@ export interface MpvEvents {
   onTracks?: (tracks: any[]) => void;
 }
 
+const MAX_STDERR_BYTES = 4096;
+
 export class MpvService {
   private mpvProcess: ChildProcess | null = null;
   private ipcSocket: net.Socket | null = null;
@@ -22,17 +24,27 @@ export class MpvService {
   private messageBuffer = '';
   private pendingRequests = new Map<number, (data: any) => void>();
   private requestId = 1;
+  private stderrBuffer = '';
 
   async startPlayback(url: string): Promise<{ success: boolean; error?: string }> {
+    console.log('[mpv] === startPlayback called ===');
+    console.log('[mpv] URL:', url.substring(0, 120) + '...');
+    const t0 = Date.now();
     try {
+      console.log('[mpv] Step 1: stopping previous playback...');
       await this.stop();
+      console.log('[mpv] Step 2: resolving mpv path...');
 
       const mpvPath = getMpvPath();
-      console.log('[mpv] Starting:', mpvPath);
+      console.log('[mpv] Resolved mpv path:', mpvPath);
 
       // Verify binary exists if it's an absolute path
       if (path.isAbsolute(mpvPath) && !fs.existsSync(mpvPath)) {
+        console.error('[mpv] Binary not found at:', mpvPath);
         return { success: false, error: `mpv binary not found at ${mpvPath}` };
+      }
+      if (path.isAbsolute(mpvPath)) {
+        console.log('[mpv] Binary exists OK');
       }
 
       const tmpDir = path.join(os.tmpdir(), 'nyaa-viewer');
@@ -42,6 +54,7 @@ export class MpvService {
 
       // Use a more unique socket path to avoid collisions
       this.ipcPath = path.join(tmpDir, `mpv-ipc-${Date.now()}-${Math.floor(Math.random() * 1000)}.sock`);
+      console.log('[mpv] IPC socket path:', this.ipcPath);
 
       const args: string[] = [
         url,
@@ -52,27 +65,39 @@ export class MpvService {
         '--slang=eng,en,fra,fr,und,jpn',
         '--sub-auto=fuzzy',
         '--ytdl=no',
-        '--hwdec=auto',
+        '--hwdec=no',
         '--force-window=yes',
       ];
 
-      console.log('[mpv] Args:', args.join(' '));
+      console.log('[mpv] Full spawn args:', args.join(' '));
+      console.log('[mpv] Step 3: spawning child process...');
 
       try {
         this.mpvProcess = spawn(mpvPath, args, {
           detached: false,
           stdio: ['ignore', 'pipe', 'pipe'],
         });
+        console.log('[mpv] Child process spawned, PID:', this.mpvProcess.pid);
 
         // Setup process monitoring IMMEDIATELY to catch early errors
-        this.mpvProcess.on('exit', (code) => {
-          console.log('[mpv] exited with code:', code);
+        this.mpvProcess.on('exit', (code, signal) => {
+          console.log('[mpv] === exit event ===');
+          console.log('[mpv] Exit code:', code, 'Signal:', signal);
+          console.log('[mpv] Stderr buffer size:', this.stderrBuffer.length, 'bytes');
           this.cleanup();
-          this.events.onEnded?.();
+          if (code !== null && code !== 0) {
+            const stderr = this.stderrBuffer.trim();
+            const detail = stderr ? `mpv exited with code ${code}\n${stderr}` : `mpv exited with code ${code}`;
+            console.error('[mpv] Abnormal exit details:', detail);
+            this.events.onError?.(detail);
+          } else {
+            console.log('[mpv] Normal exit, calling onEnded');
+            this.events.onEnded?.();
+          }
         });
 
         this.mpvProcess.on('error', (err) => {
-          console.error('[mpv] process error:', err);
+          console.error('[mpv] === error event ===', err);
           this.events.onError?.(err.message);
         });
       } catch (spawnError: any) {
@@ -86,18 +111,35 @@ export class MpvService {
       });
 
       this.mpvProcess.stderr?.on('data', (data) => {
-        const msg = data.toString().trim();
-        if (msg) console.log('[mpv stderr]', msg);
+        const msg = data.toString();
+        // Buffer stderr (capped) so it's available if mpv exits abnormally
+        if (this.stderrBuffer.length < MAX_STDERR_BYTES) {
+          this.stderrBuffer += msg;
+          if (this.stderrBuffer.length > MAX_STDERR_BYTES) {
+            this.stderrBuffer = this.stderrBuffer.slice(-MAX_STDERR_BYTES);
+          }
+        }
+        // Log every stderr chunk for debugging
+        const lines = msg.trim().split('\n').filter(Boolean);
+        for (const line of lines) {
+          console.log(`[mpv stderr] ${line}`);
+        }
       });
 
       // Wait for socket to be ready with retries
+      console.log('[mpv] Step 4: connecting to IPC socket...');
       await this.connectToIpc(30000);
+      console.log('[mpv] IPC socket connected after', Date.now() - t0, 'ms');
 
       this.isPlaying = true;
+      console.log('[mpv] Step 5: marking as playing, emitting onReady');
       this.events.onReady?.();
 
+      const elapsed = Date.now() - t0;
+      console.log('[mpv] === startPlayback completed OK in', elapsed, 'ms ===');
       return { success: true };
     } catch (e: any) {
+      console.error('[mpv] === startPlayback FAILED in', Date.now() - t0, 'ms ===');
       console.error('[mpv] Start failed:', e);
       this.cleanup();
       return { success: false, error: e.message };
@@ -110,28 +152,40 @@ export class MpvService {
 
     return new Promise((resolve, reject) => {
       const tryConnect = () => {
-        if (Date.now() - start > timeoutMs) {
+        const elapsed = Date.now() - start;
+        if (elapsed > timeoutMs) {
+          console.error('[mpv] IPC connect timeout after', elapsed, 'ms,', attempt, 'attempts');
           return reject(new Error('IPC timeout: mpv failed to create socket in time'));
         }
 
         // Check if process is still alive
         if (this.mpvProcess?.exitCode !== null && this.mpvProcess?.exitCode !== undefined) {
+          console.error('[mpv] Process already exited (attempt', attempt, ') with code', this.mpvProcess.exitCode);
           return reject(new Error(`mpv exited prematurely with code ${this.mpvProcess.exitCode}`));
+        }
+
+        if (attempt <= 3 || attempt % 10 === 0) {
+          console.log(`[mpv] IPC connect attempt #${attempt} after ${elapsed}ms`);
         }
 
         const socket = net.createConnection(this.ipcPath);
 
         socket.on('connect', () => {
-          console.log('[mpv] Connected to IPC socket after', attempt, 'attempts');
+          console.log('[mpv] IPC socket connected after', attempt, 'attempts,', Date.now() - start, 'ms');
           this.ipcSocket = socket;
           this.setupSocketHandlers();
           resolve();
         });
 
-        socket.on('error', () => {
+        socket.on('error', (err) => {
           socket.destroy();
           attempt++;
-          setTimeout(tryConnect, 200); // Retry every 200ms
+          const retryIn = 200;
+          // Log every N attempts
+          if (attempt <= 5 || attempt % 25 === 0) {
+            console.log(`[mpv] IPC connect failed attempt ${attempt - 1}, retrying in ${retryIn}ms... (${err.message})`);
+          }
+          setTimeout(tryConnect, retryIn);
         });
       };
 
@@ -142,6 +196,7 @@ export class MpvService {
   private setupSocketHandlers(): void {
     if (!this.ipcSocket) return;
 
+    console.log('[mpv] Setting up socket handlers');
     this.ipcSocket.on('data', (data) => {
       this.messageBuffer += data.toString();
       const lines = this.messageBuffer.split('\n');
@@ -151,6 +206,7 @@ export class MpvService {
         if (!line.trim()) continue;
         try {
           const msg = JSON.parse(line);
+          console.log('[mpv] Received IPC message:', JSON.stringify(msg).substring(0, 300));
           this.handleIpcMessage(msg);
         } catch (e) {
           console.error('[mpv] Error parsing IPC message:', e, 'Line:', line);

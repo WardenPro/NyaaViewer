@@ -102,9 +102,20 @@ export default function PlayerPage() {
     return () => clearInterval(interval);
   }, [player.isPlaying, player.currentTorrent, player.currentPosition, player.duration]);
 
+  const log = useCallback((...args: unknown[]) => {
+    const ts = new Date().toISOString();
+    console.log(`[PlayerPage] [${ts}]`, ...args);
+  }, []);
+
   const startTorrentFlow = useCallback(async (torrentData: any) => {
-    if (!torrentData || isFlowStarted.current) return;
+    log('=== startTorrentFlow ===');
+    log('Torrent data: title=' + (torrentData?.title || 'N/A'));
+    if (!torrentData || isFlowStarted.current) {
+      log('Aborted: no torrent or already started');
+      return;
+    }
     isFlowStarted.current = true;
+    const flowStart = Date.now();
 
     setIsLoading(true);
     setError('');
@@ -112,17 +123,22 @@ export default function PlayerPage() {
 
     try {
       const apiKey = useAppStore.getState().allDebridApiKey;
+      log('API key present: ' + !!apiKey);
       if (!apiKey) {
         throw new Error('AllDebrid API key not configured. Please go to Settings.');
       }
 
+      log('Step 1: Uploading magnet to AllDebrid...');
       setStatusText('Uploading magnet...');
       const uploadResult = await window.electronAPI.uploadMagnet(torrentData.magnetUri) as any;
+      log('Upload result: ' + JSON.stringify(uploadResult));
       if (uploadResult.error) throw new Error(uploadResult.error);
 
       const torrentId = uploadResult.id;
+      log(`Torrent ID: ${torrentId}, Ready: ${uploadResult.ready}`);
 
       if (!uploadResult.ready) {
+        log('Torrent not yet ready, starting poll...');
         setStatusText('Waiting for AllDebrid to download...');
         let ready = false;
         let attempts = 0;
@@ -131,10 +147,12 @@ export default function PlayerPage() {
         while (attempts < maxAttempts) {
           await new Promise(r => setTimeout(r, 5000));
           const status = await window.electronAPI.getTorrentStatus(torrentId) as any;
-          
+          log(`Poll #${attempts + 1}: ${JSON.stringify(status)}`);
+
           if (status.error) throw new Error(status.error);
           if (status.ready) {
             ready = true;
+            log(`Torrent is READY after ${Date.now() - flowStart} ms`);
             break;
           }
 
@@ -144,32 +162,41 @@ export default function PlayerPage() {
         }
 
         if (!ready) throw new Error('Download timed out on AllDebrid side.');
+      } else {
+        log(`Torrent was already ready/cached, elapsed: ${Date.now() - flowStart} ms`);
       }
 
+      log('Step 2: Fetching file list...');
       setStatusText('Fetching file list...');
       const files = await window.electronAPI.getTorrentFiles(torrentId) as TorrentFile[];
+      log(`Files received: ${files.length} — ` + files.map(f => f.path).join(', '));
       setTorrentFiles(files);
 
       const videoFiles = files
         .filter(f => VIDEO_EXTS.some(ext => f.path.toLowerCase().endsWith(ext)))
         .sort((a, b) => b.size - a.size);
 
+      log(`Video files after filtering: ${videoFiles.length} — ` + videoFiles.map(f => f.path).join(', '));
+
       if (videoFiles.length === 0) {
         throw new Error('No video files found in this torrent.');
       }
 
       if (videoFiles.length === 1) {
+        log('Single video file, auto-playing...');
         await playFile(videoFiles[0], torrentData);
       } else {
+        log('Multiple video files, showing selection list');
         setStatusText('Multiple video files found. Please select one.');
         setIsLoading(false);
       }
     } catch (e: any) {
+      log('ERROR in startTorrentFlow: ' + e.message);
       setError(e.message);
       setIsLoading(false);
       isFlowStarted.current = false;
     }
-  }, []);
+  }, [log]);
 
   useEffect(() => {
     if (torrent && !isLoading && torrentFiles.length === 0 && !player.isPlaying) {
@@ -181,18 +208,26 @@ export default function PlayerPage() {
     setSelectedFile(file);
     setIsLoading(true);
     setError('');
-    setStatusText(`Unlocking: ${file.path.split('/').pop()}`);
+    const fileName = file.path.split('/').pop() || file.path;
+    log(`=== playFile === file: ${fileName} link present: ${!!file.link}`);
+    setStatusText(`Unlocking: ${fileName}`);
 
     try {
       if (!file.link) throw new Error('No link available for this file.');
 
+      log('Step 3: Unlocking link...');
       const unlock = await window.electronAPI.unlockLink(file.link) as any;
+      log('Unlock result: ' + JSON.stringify(unlock));
       if (!unlock.success) throw new Error(unlock.error || 'Failed to unlock link');
+      log('Unlocked URL (first 100): ' + (unlock.link || '').substring(0, 100));
 
+      log('Step 4: Starting playback...');
       setStatusText('Starting mpv...');
       const playback = await window.electronAPI.startPlayback(unlock.link) as any;
+      log('Start playback result:', JSON.stringify(playback));
       if (!playback.success) throw new Error(playback.error || 'Failed to start mpv');
 
+      log('Step 5: Setting player state to playing');
       setPlayerState({
         isPlaying: true,
         currentTorrent: torrentData,
@@ -208,9 +243,11 @@ export default function PlayerPage() {
         lastWatched: new Date().toISOString()
       });
 
+      log('=== playFile completed OK ===');
       setIsLoading(false);
       setStatusText('');
     } catch (e: any) {
+      log('ERROR in playFile:', e.message);
       setError(e.message);
       setIsLoading(false);
     }

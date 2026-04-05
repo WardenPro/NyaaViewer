@@ -18,12 +18,14 @@ export function registerPlayerHandlers(): void {
       }
     },
     onEnded: () => {
+      console.log('[IPC/player] === onEnded === forwarding to renderer');
       const win = getMainWindow();
       if (win) {
         win.webContents.send('player-ended');
       }
     },
     onError: (error) => {
+      console.error('[IPC/player] === onError === forwarding to renderer:', error);
       const win = getMainWindow();
       if (win) {
         win.webContents.send('player-error', error);
@@ -32,22 +34,29 @@ export function registerPlayerHandlers(): void {
   });
 
   ipcMain.handle('start-playback', async (_event, url: string) => {
+    console.log('[IPC/player] === start-playback IPC === URL (first 100):', url.substring(0, 100));
     try {
-      return await mpvService.startPlayback(url);
+      const result = await mpvService.startPlayback(url);
+      console.log('[IPC/player] start-playback result:', JSON.stringify(result));
+      return result;
     } catch (e: any) {
+      console.error('[IPC/player] start-playback exception:', e.message);
       return { success: false, error: e.message };
     }
   });
 
   ipcMain.handle('pause-playback', async () => {
+    console.log('[IPC/player] pause-playback');
     await mpvService.pause();
   });
 
   ipcMain.handle('seek-playback', async (_event, position: number) => {
+    console.log('[IPC/player] seek-playback:', position);
     await mpvService.seek(position);
   });
 
   ipcMain.handle('stop-playback', async () => {
+    console.log('[IPC/player] stop-playback');
     await mpvService.stop();
     videoWindow.hide();
   });

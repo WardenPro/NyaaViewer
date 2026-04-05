@@ -76,9 +76,11 @@ export class AllDebridService {
   }
 
   async uploadMagnet(magnetUri: string): Promise<{ id?: number; ready?: boolean; error?: string }> {
+    console.log('[AD] === uploadMagnet called ===');
     this.ensureKey();
 
     try {
+      console.log('[AD] Uploading magnet to', AD_BASE, '/v4/magnet/upload');
       const params = new URLSearchParams();
       params.append('magnets[]', magnetUri);
       params.append('agent', AGENT);
@@ -89,10 +91,13 @@ export class AllDebridService {
 
       const data = response.data;
       this.writeDebug({ uploadResponse: data });
+      console.log('[AD] uploadMagnet response status:', data?.status);
 
       if (data?.status === 'success' && data?.data?.magnets?.length > 0) {
         const magnet = data.data.magnets[0];
+        console.log('[AD] Magnet info: id=', magnet.id, 'ready=', magnet.ready, 'hash=', magnet.hash, 'filename=', magnet.filename);
         if (magnet.error) {
+          console.log('[AD] Magnet has error:', magnet.error);
           return { error: magnet.error.message || 'Magnet upload failed' };
         }
         return {
@@ -101,6 +106,7 @@ export class AllDebridService {
         };
       }
 
+      console.log('[AD] uploadMagnet: no magnets in response');
       return { error: data?.error?.message || 'Failed to upload magnet' };
     } catch (e: any) {
       return { error: e.response?.data?.error?.message || e.message };
@@ -131,6 +137,7 @@ export class AllDebridService {
       if (data?.status === 'success') {
         const magnet = data.data?.magnet || (data.data?.magnets && data.data.magnets[0]);
         if (magnet) {
+          console.log('[AD] torrentStatus: id=', magnet.id, 'statusCode=', magnet.statusCode, 'status=', magnet.status, 'pct=', magnet.downloaded, '/', magnet.size);
           return {
             ready: magnet.statusCode === 4,
             status: magnet.status,
@@ -142,11 +149,13 @@ export class AllDebridService {
 
       return { ready: false, error: data?.error?.message || 'Status check failed' };
     } catch (e: any) {
+      console.log('[AD] getTorrentStatus error:', e.message);
       return { ready: false, error: e.response?.data?.error?.message || e.message };
     }
   }
 
   async getTorrentFiles(id: number): Promise<ADFile[]> {
+    console.log('[AD] === getTorrentFiles called, id=', id, '===');
     this.ensureKey();
 
     try {
@@ -160,14 +169,18 @@ export class AllDebridService {
 
       const data = response.data;
       this.writeDebug({ filesResponse: data });
+      console.log('[AD] getTorrentFiles response status:', data?.status);
 
       if (data?.status === 'success' && data?.data?.magnets) {
         const magnetEntry = data.data.magnets.find((m: any) => String(m.id) === String(id));
         if (magnetEntry?.files) {
-          return this.flattenFiles(magnetEntry.files);
+          const files = this.flattenFiles(magnetEntry.files);
+          console.log(`[AD] Flattened ${files.length} files, video candidates:`, files.map(f => f.path.split('/').pop() || f.path));
+          return files;
         }
       }
 
+      console.log('[AD] No files found for torrent', id);
       return [];
     } catch (e: any) {
       console.error('[AD] Get files failed:', e.message);
@@ -204,31 +217,57 @@ export class AllDebridService {
   }
 
   async unlockFile(fileLink: string): Promise<{ success: boolean; link?: string; error?: string }> {
+    console.log('[AD] === unlockFile called, link=', fileLink.substring(0, 80), '... ===');
     this.ensureKey();
+    const t0 = Date.now();
 
     try {
       const params = new URLSearchParams();
       params.append('link', fileLink);
       params.append('agent', AGENT);
 
+      console.log('[AD] POST /v4/link/unlock');
       const response = await this.client.post('/v4/link/unlock', params.toString(), {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       });
 
       const data = response.data;
+      console.log('[AD] unlockFile response status:', data?.status, 'in', Date.now() - t0, 'ms');
       if (data?.status === 'success' && data?.data?.link) {
+        const directLink = data.data.link as string;
+        console.log('[AD] Direct link obtained (first 100 chars):', directLink.substring(0, 100));
+
+        // Verify the CDN URL is actually reachable before handing it to the player
+        console.log('[AD] Step: verifying CDN link reachability via HEAD...');
+        try {
+          const head = await this.client.head(directLink, { timeout: 10000, validateStatus: () => true });
+          const s = head.status;
+          console.log('[AD] CDN HEAD response status:', s);
+          if (s >= 500 || s === 403 || s === 404) {
+            console.log('[AD] CDN link unavailable:', s);
+            return { success: false, error: `AllDebrid CDN link is unavailable (HTTP ${s}). Try again or pick a different file.` };
+          }
+          console.log('[AD] CDN link verified OK');
+        } catch (headErr: any) {
+          console.log('[AD] CDN HEAD check failed (non-critical):', headErr.message);
+          // Non-critical — let the player try anyway
+        }
+
         return {
           success: true,
-          link: data.data.link,
+          link: directLink,
         };
       }
 
       if (data?.data?.delayed) {
+        console.log('[AD] Link is delayed (downloading)');
         return { success: false, error: 'File is being downloaded by AllDebrid, please wait.' };
       }
 
+      console.log('[AD] Unlock failed:', data?.error?.message);
       return { success: false, error: data?.error?.message || 'Unlock failed' };
     } catch (e: any) {
+      console.log('[AD] unlockFile exception:', e.message);
       return { success: false, error: e.response?.data?.error?.message || e.message };
     }
   }
