@@ -47,13 +47,16 @@ export class MpvService {
         console.log('[mpv] Binary exists OK');
       }
 
-      const tmpDir = path.join(os.tmpdir(), 'nyaa-viewer');
-      if (!fs.existsSync(tmpDir)) {
-        fs.mkdirSync(tmpDir, { recursive: true });
+      const isWin = process.platform === 'win32';
+      if (isWin) {
+        this.ipcPath = `\\\\.\\pipe\\mpv-ipc-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      } else {
+        const tmpDir = path.join(os.tmpdir(), 'nyaa-viewer');
+        if (!fs.existsSync(tmpDir)) {
+          fs.mkdirSync(tmpDir, { recursive: true });
+        }
+        this.ipcPath = path.join(tmpDir, `mpv-ipc-${Date.now()}-${Math.floor(Math.random() * 1000)}.sock`);
       }
-
-      // Use a more unique socket path to avoid collisions
-      this.ipcPath = path.join(tmpDir, `mpv-ipc-${Date.now()}-${Math.floor(Math.random() * 1000)}.sock`);
       console.log('[mpv] IPC socket path:', this.ipcPath);
 
       const args: string[] = [
@@ -349,7 +352,7 @@ export class MpvService {
       this.mpvProcess = null;
     }
 
-    if (this.ipcPath && fs.existsSync(this.ipcPath)) {
+    if (this.ipcPath && process.platform !== 'win32' && fs.existsSync(this.ipcPath)) {
       try { fs.unlinkSync(this.ipcPath); } catch (_) {}
     }
   }

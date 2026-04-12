@@ -42,11 +42,13 @@
       "dist-electron/**/*",
       "node_modules/**/*"
     ],
-    "extraFiles": [
+    "extraResources": [
       {
         "from": "bin/",
-        "to": "Resources/bin",
-        "filter": ["**/*"]
+        "to": "bin",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "win": {

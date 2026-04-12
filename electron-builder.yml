@@ -5,7 +5,11 @@ directories:
 files:
   - dist
   - dist-electron
-  - bin/**/*
+extraResources:
+  - from: bin
+    to: bin
+    filter:
+      - "**/*"
 win:
   target:
     - nsis
