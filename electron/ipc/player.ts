@@ -36,7 +36,20 @@ export function registerPlayerHandlers(): void {
   ipcMain.handle('start-playback', async (_event, url: string) => {
     console.log('[IPC/player] === start-playback IPC === URL (first 100):', url.substring(0, 100));
     try {
-      const result = await mpvService.startPlayback(url);
+      const win = getMainWindow();
+      let wid: string | number | null = null;
+      if (win) {
+        const handle = win.getNativeWindowHandle();
+        if (process.platform === 'win32') {
+          wid = handle.length >= 8 ? Number(handle.readBigInt64LE(0)) : handle.readInt32LE(0);
+        } else if (process.platform === 'darwin') {
+          wid = handle.readUInt32LE(0);
+        } else {
+          wid = '0x' + handle.readBigUInt64LE(0).toString(16);
+        }
+      }
+      
+      const result = await mpvService.startPlayback(url, wid);
       console.log('[IPC/player] start-playback result:', JSON.stringify(result));
       return result;
     } catch (e: any) {

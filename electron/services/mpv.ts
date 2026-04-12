@@ -26,7 +26,7 @@ export class MpvService {
   private requestId = 1;
   private stderrBuffer = '';
 
-  async startPlayback(url: string): Promise<{ success: boolean; error?: string }> {
+  async startPlayback(url: string, wid?: string | number | null): Promise<{ success: boolean; error?: string }> {
     console.log('[mpv] === startPlayback called ===');
     console.log('[mpv] URL:', url.substring(0, 120) + '...');
     const t0 = Date.now();
@@ -69,8 +69,14 @@ export class MpvService {
         '--sub-auto=fuzzy',
         '--ytdl=no',
         '--hwdec=no',
-        '--force-window=yes',
       ];
+
+      if (wid !== undefined && wid !== null) {
+        console.log(`[mpv] Attaching to Window ID: ${wid}`);
+        args.push(`--wid=${wid}`);
+      } else {
+        args.push('--force-window=yes');
+      }
 
       console.log('[mpv] Full spawn args:', args.join(' '));
       console.log('[mpv] Step 3: spawning child process...');
