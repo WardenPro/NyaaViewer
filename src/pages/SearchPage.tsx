@@ -27,7 +27,7 @@ export default function SearchPage() {
   const performSearch = async (query: string) => {
     setIsSearching(true);
     try {
-      const finalQuery = useTsundereRaws ? `${query} Tsundere-Raws` : query;
+      const finalQuery = useTsundereRaws ? `${query} "-Tsundere-Raws (CR)"` : query;
       const results = await window.electronAPI.searchNyaa(finalQuery, {
         resolution: selectedResolution,
         category: selectedCategory,

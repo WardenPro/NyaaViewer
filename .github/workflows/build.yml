@@ -9,9 +9,40 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
+  version:
+    name: Bump Version
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.bump.outputs.new_version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Bump version
+        id: bump
+        run: |
+          git config user.name "WardenPro"
+          git config user.email "WardenPro@users.noreply.github.com"
+          npm version patch -m "chore: bump version to %s [skip ci]"
+          echo "new_version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+          git push origin main --follow-tags
+
   build:
     name: Build (${{ matrix.os }})
+    needs: version
     runs-on: ${{ matrix.os }}
 
     strategy:
