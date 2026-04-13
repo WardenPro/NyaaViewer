@@ -16,10 +16,26 @@ export interface NyaaTorrent {
   categoryId?: string;
 }
 
-export async function searchNyaa(query: string, filter?: string): Promise<NyaaTorrent[]> {
-  const filterSuffix = filter ? `+${filter}p` : '';
-  const searchQuery = `${query}${filterSuffix}`;
-  const url = `${NYAA_SEARCH_RSS}${encodeURIComponent(searchQuery)}`;
+export interface NyaaSearchOptions {
+  category?: string;
+  filter?: number; // 0: No filter, 1: No remakes, 2: Trusted only
+  sort?: string;
+  order?: string;
+  resolution?: string;
+}
+
+export async function searchNyaa(query: string, options: NyaaSearchOptions = {}): Promise<NyaaTorrent[]> {
+  const params = new URLSearchParams({
+    page: 'rss',
+    q: query + (options.resolution ? ` ${options.resolution}p` : ''),
+  });
+
+  if (options.category) params.append('c', options.category);
+  if (options.filter !== undefined) params.append('f', String(options.filter));
+  if (options.sort) params.append('s', options.sort);
+  if (options.order) params.append('o', options.order);
+
+  const url = `${NYAA_BASE}/?${params.toString()}`;
 
   try {
     const response = await fetch(url, {

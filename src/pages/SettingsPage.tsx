@@ -32,7 +32,7 @@ export default function SettingsPage() {
   useEffect(() => {
     if (!window.electronAPI?.onUpdateStatus) return;
 
-    window.electronAPI.onUpdateStatus((data: { type: string; version?: string; percent?: number }) => {
+    window.electronAPI.onUpdateStatus((data: { type: string; version?: string; percent?: number; message?: string }) => {
       switch (data.type) {
         case 'checking':
           setUpdateStatus('Checking...');
@@ -54,16 +54,23 @@ export default function SettingsPage() {
           setUpdateProgress(0);
           break;
         case 'error':
-          setUpdateStatus(`Update error`);
+          setUpdateStatus(`Error: ${data.message || 'Update check failed'}`);
           setUpdateProgress(0);
           break;
       }
     });
   }, []);
 
-  const handleCheckUpdates = () => {
-    setUpdateStatus('');
-    window.electronAPI.checkForUpdates();
+  const handleCheckUpdates = async () => {
+    setUpdateStatus('Checking for updates...');
+    try {
+      const result = await window.electronAPI.checkForUpdates() as { checking?: boolean; error?: string };
+      if (result.error) {
+        setUpdateStatus(`Error: ${result.error}`);
+      }
+    } catch (e: any) {
+      setUpdateStatus(`Error: ${e?.message || 'Update check failed'}`);
+    }
   };
 
   const loadSavedApiKey = async () => {

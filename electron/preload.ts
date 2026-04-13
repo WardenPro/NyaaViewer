@@ -3,8 +3,8 @@ import { contextBridge, ipcRenderer } from 'electron';
 // Define the API exposed to the renderer
 const api = {
   // Search
-  searchNyaa: (query: string, filter?: string) =>
-    ipcRenderer.invoke('search-nyaa', query, filter),
+  searchNyaa: (query: string, options?: any) =>
+    ipcRenderer.invoke('search-nyaa', query, options),
   getTrending: () =>
     ipcRenderer.invoke('get-trending'),
 

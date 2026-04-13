@@ -18,6 +18,7 @@ function setupAutoUpdater() {
     try {
       const { autoUpdater: updater } = require('electron-updater');
       autoUpdater = updater;
+      autoUpdater.logger = console;
       autoUpdater.autoDownload = true;
       autoUpdater.autoInstallOnAppQuit = true;
       autoUpdater.allowPrerelease = false;
@@ -58,20 +59,23 @@ function setupAutoUpdater() {
           message: err.message,
         });
       });
-    } catch {
-      console.warn('electron-updater not available, skipping auto-update setup');
+    } catch (e) {
+      console.warn('electron-updater not available, skipping auto-update setup', e);
     }
   }
 
   // IPC handler for manual check
-  ipcMain.handle('check-for-updates', () => {
-    if (autoUpdater && !app.isPackaged) {
-      // In dev, electron-updater is not installed
+  ipcMain.handle('check-for-updates', async () => {
+    if (!app.isPackaged) {
       return { error: 'Update checks only work in production builds' };
     }
     if (autoUpdater) {
-      autoUpdater.checkForUpdates();
-      return { checking: true };
+      try {
+        await autoUpdater.checkForUpdates();
+        return { checking: true };
+      } catch (err: any) {
+        return { error: err.message || 'Failed to start update check' };
+      }
     }
     return { error: 'Auto-updater not initialized' };
   });

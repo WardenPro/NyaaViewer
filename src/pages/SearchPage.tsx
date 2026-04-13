@@ -13,18 +13,26 @@ export default function SearchPage() {
   const setIsSearching = useAppStore((s) => s.setIsSearching);
 
   const [selectedResolution, setSelectedResolution] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('1_0');
+  const [selectedFilter, setSelectedFilter] = useState(0);
+  const [useTsundereRaws, setUseTsundereRaws] = useState(false);
   const [sortBySeeders, setSortBySeeders] = useState(true);
 
   useEffect(() => {
     if (searchQuery) {
       performSearch(searchQuery);
     }
-  }, [searchQuery]);
+  }, [searchQuery, selectedResolution, selectedCategory, selectedFilter, useTsundereRaws]);
 
   const performSearch = async (query: string) => {
     setIsSearching(true);
     try {
-      const results = await window.electronAPI.searchNyaa(query, selectedResolution);
+      const finalQuery = useTsundereRaws ? `${query} Tsundere-Raws` : query;
+      const results = await window.electronAPI.searchNyaa(finalQuery, {
+        resolution: selectedResolution,
+        category: selectedCategory,
+        filter: selectedFilter,
+      });
       setSearchResults(results as any);
     } catch (e) {
       console.error('Search failed:', e);
@@ -34,9 +42,10 @@ export default function SearchPage() {
     }
   };
 
-  const handleSearch = (query: string, filter?: string) => {
-    setSelectedResolution(filter || '');
-    performSearch(query);
+  const setSearchQuery = useAppStore((s) => s.setSearchQuery);
+...
+  const handleSearch = (query: string) => {
+    setSearchQuery(query);
   };
 
   // Sort results
@@ -58,29 +67,71 @@ export default function SearchPage() {
       <SearchBar onSearch={handleSearch} />
 
       {/* Filters */}
-      <div className="flex gap-3 items-center">
-        <label className="text-sm text-dark-textMuted">Resolution:</label>
-        <select
-          value={selectedResolution}
-          onChange={(e) => {
-            setSelectedResolution(e.target.value);
-            if (searchQuery) performSearch(searchQuery);
-          }}
-          className="input-field text-sm py-1 px-3"
-        >
-          <option value="">All</option>
-          <option value="1080">1080p</option>
-          <option value="720">720p</option>
-          <option value="480">480p</option>
-        </select>
+      <div className="flex flex-wrap gap-4 items-center bg-dark-bgLight p-4 rounded-lg">
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-dark-textMuted uppercase font-semibold">Resolution</label>
+          <select
+            value={selectedResolution}
+            onChange={(e) => setSelectedResolution(e.target.value)}
+            className="input-field text-sm py-1 px-3 min-w-[100px]"
+          >
+            <option value="">All</option>
+            <option value="1080">1080p</option>
+            <option value="720">720p</option>
+            <option value="480">480p</option>
+          </select>
+        </div>
 
-        <label className="text-sm text-dark-textMuted ml-4">Sort:</label>
-        <button
-          onClick={() => setSortBySeeders(!sortBySeeders)}
-          className="text-sm btn-secondary py-1 px-3"
-        >
-          {sortBySeeders ? 'Seeders' : 'Title'}
-        </button>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-dark-textMuted uppercase font-semibold">Category</label>
+          <select
+            value={selectedCategory}
+            onChange={(e) => setSelectedCategory(e.target.value)}
+            className="input-field text-sm py-1 px-3 min-w-[140px]"
+          >
+            <option value="1_0">All Anime</option>
+            <option value="1_2">Anime - English</option>
+            <option value="1_3">Anime - Non-English</option>
+            <option value="1_4">Anime - Raw</option>
+          </select>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-dark-textMuted uppercase font-semibold">Filter</label>
+          <select
+            value={selectedFilter}
+            onChange={(e) => setSelectedFilter(Number(e.target.value))}
+            className="input-field text-sm py-1 px-3 min-w-[120px]"
+          >
+            <option value={0}>No filter</option>
+            <option value={1}>No remakes</option>
+            <option value={2}>Trusted only</option>
+          </select>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-dark-textMuted uppercase font-semibold">Special</label>
+          <button
+            onClick={() => setUseTsundereRaws(!useTsundereRaws)}
+            className={`text-sm py-1 px-4 rounded transition-colors ${
+              useTsundereRaws
+                ? 'bg-primary/20 text-primary border border-primary/50'
+                : 'bg-dark-bg text-dark-textMuted border border-white/10 hover:border-white/20'
+            }`}
+          >
+            Tsundere-Raws
+          </button>
+        </div>
+
+        <div className="flex flex-col gap-1 ml-auto">
+          <label className="text-xs text-dark-textMuted uppercase font-semibold">Sort</label>
+          <button
+            onClick={() => setSortBySeeders(!sortBySeeders)}
+            className="text-sm btn-secondary py-1 px-4 min-w-[100px]"
+          >
+            {sortBySeeders ? 'Seeders' : 'Title'}
+          </button>
+        </div>
       </div>
 
       {/* Results */}
