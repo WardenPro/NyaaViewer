@@ -79,7 +79,7 @@ contextBridge.exposeInMainWorld('electronAPI', api);
 
 // Type definitions for the exposed API
 export interface ElectronAPI {
-  searchNyaa: (query: string, filter?: string) => Promise<unknown>;
+  searchNyaa: (query: string, options?: any) => Promise<unknown>;
   getTrending: () => Promise<unknown>;
   verifyAllDebridKey: (apiKey: string) => Promise<{ success: boolean; error?: string; username?: string }>;
   uploadMagnet: (magnetUri: string) => Promise<unknown>;

@@ -43,7 +43,7 @@ export default function SearchPage() {
   };
 
   const setSearchQuery = useAppStore((s) => s.setSearchQuery);
-...
+
   const handleSearch = (query: string) => {
     setSearchQuery(query);
   };
