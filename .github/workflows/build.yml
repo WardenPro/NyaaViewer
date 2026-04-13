@@ -83,6 +83,7 @@ jobs:
             release/*.exe
             release/*.AppImage
             release/*.dmg
+            release/*.yml
           retention-days: 30
           if-no-files-found: warn
 
