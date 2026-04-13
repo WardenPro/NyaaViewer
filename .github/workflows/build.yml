@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       new_version: ${{ steps.bump.outputs.new_version }}
+      new_sha: ${{ steps.bump.outputs.new_sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -38,11 +39,13 @@ jobs:
           git config user.email "WardenPro@users.noreply.github.com"
           npm version patch -m "chore: bump version to %s [skip ci]"
           echo "new_version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+          echo "new_sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
           git push origin main --follow-tags
 
   build:
     name: Build (${{ matrix.os }})
     needs: version
+    if: always() && (needs.version.result == 'success' || needs.version.result == 'skipped')
     runs-on: ${{ matrix.os }}
 
     strategy:
@@ -53,6 +56,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ needs.version.outputs.new_sha || github.sha }}
           lfs: false
 
       - name: Create LFS file list
