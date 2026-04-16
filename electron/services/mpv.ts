@@ -4,13 +4,14 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { getMpvPath } from '../utils/binaries';
+import type { SubtitleTrack } from '../../src/types/player';
 
 export interface MpvEvents {
   onPositionUpdate?: (data: { position: number; duration: number }) => void;
   onEnded?: () => void;
   onError?: (error: string) => void;
   onReady?: () => void;
-  onTracks?: (tracks: any[]) => void;
+  onTracks?: (tracks: SubtitleTrack[]) => void;
 }
 
 const MAX_STDERR_BYTES = 4096;
@@ -265,8 +266,18 @@ export class MpvService {
         });
 
         if (tracks && Array.isArray(tracks)) {
-          const subs = tracks.filter((t: any) => t.type === 'sub');
-          this.events.onTracks?.(subs);
+          const subtitleTracks = tracks
+            .filter((track: any) => track.type === 'sub')
+            .map((track: any): SubtitleTrack => ({
+              id: String(track.id),
+              language: String(track.lang || track.language || 'und').toLowerCase().slice(0, 2),
+              codec: String(track.codec || track.codec_desc || 'unknown'),
+              name: typeof track.title === 'string' ? track.title : undefined,
+              forced: Boolean(track.forced),
+              default: Boolean(track.default),
+            }));
+
+          this.events.onTracks?.(subtitleTracks);
         }
       } catch (_) {}
 
@@ -297,9 +308,22 @@ export class MpvService {
     await this.sendCommand(['set', 'sid', sid]);
   }
 
-  async getTracks(): Promise<any[]> {
+  async getTracks(): Promise<SubtitleTrack[]> {
     const tracks = await this.getProperty('track-list');
-    return Array.isArray(tracks) ? tracks : [];
+    if (!Array.isArray(tracks)) {
+      return [];
+    }
+
+    return tracks
+      .filter((track: any) => track.type === 'sub')
+      .map((track: any): SubtitleTrack => ({
+        id: String(track.id),
+        language: String(track.lang || track.language || 'und').toLowerCase().slice(0, 2),
+        codec: String(track.codec || track.codec_desc || 'unknown'),
+        name: typeof track.title === 'string' ? track.title : undefined,
+        forced: Boolean(track.forced),
+        default: Boolean(track.default),
+      }));
   }
 
   async getPosition(): Promise<{ position: number; duration: number }> {

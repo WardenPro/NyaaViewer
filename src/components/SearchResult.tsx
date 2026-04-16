@@ -1,15 +1,8 @@
+import type { NyaaResult } from '../types/nyaa';
+
 interface SearchResultProps {
-  result: {
-    title: string;
-    size: string;
-    seeders: number;
-    leechers: number;
-    date: string;
-    infohash: string;
-    magnetUri: string;
-    resolution?: string;
-  };
-  onPlay: (result: SearchResultProps['result']) => void;
+  result: NyaaResult;
+  onPlay: (result: NyaaResult) => void;
 }
 
 export default function SearchResult({ result, onPlay }: SearchResultProps) {
@@ -64,7 +57,7 @@ export default function SearchResult({ result, onPlay }: SearchResultProps) {
           onClick={() => onPlay(result)}
           className="btn-primary text-sm py-1.5 px-4 opacity-0 group-hover:opacity-100 transition-opacity"
         >
-          ▶ Stream
+          ▶ Lire
         </button>
       </div>
     </div>

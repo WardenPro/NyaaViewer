@@ -1,6 +1,7 @@
 import { app, ipcMain } from 'electron';
 import fs from 'fs';
 import path from 'path';
+import type { WatchEntry } from '../../src/types/storage';
 
 const STORAGE_DIR = path.join(app.getPath('userData'), 'nyaa-viewer');
 const HISTORY_FILE = path.join(STORAGE_DIR, 'watch-history.json');
@@ -34,17 +35,6 @@ function writeJsonFile(filePath: string, data: unknown): void {
   } catch (e) {
     console.error(`Failed to write ${filePath}:`, e);
   }
-}
-
-// Watch history
-export interface WatchEntry {
-  infohash: string;
-  title: string;
-  lastPosition: number;
-  duration: number;
-  lastWatched: string;
-  magnetUri: string;
-  selectedSubtitle?: { id: string; language: string };
 }
 
 function getHistoryPath(): string {
@@ -103,6 +93,14 @@ export function setConfig(config: Partial<AppConfig>): void {
   writeJsonFile(CONFIG_FILE, { ...existing, ...config });
 }
 
+export function getPreferredSubtitleLang(): string | null {
+  return getConfig().preferredSubtitleLang || null;
+}
+
+export function setPreferredSubtitleLang(lang: string): void {
+  setConfig({ preferredSubtitleLang: lang });
+}
+
 // Register IPC handlers
 export function registerStorageHandlers(): void {
   ipcMain.handle('get-watch-history', (): WatchEntry[] => {
@@ -119,5 +117,13 @@ export function registerStorageHandlers(): void {
 
   ipcMain.handle('remove-watch-entry', (_event, infohash: string): void => {
     removeWatchEntry(infohash);
+  });
+
+  ipcMain.handle('get-preferred-subtitle-lang', (): string | null => {
+    return getPreferredSubtitleLang();
+  });
+
+  ipcMain.handle('set-preferred-subtitle-lang', (_event, lang: string): void => {
+    setPreferredSubtitleLang(lang);
   });
 }

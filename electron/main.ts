@@ -73,8 +73,9 @@ function setupAutoUpdater() {
       try {
         await autoUpdater.checkForUpdates();
         return { checking: true };
-      } catch (err: any) {
-        return { error: err.message || 'Failed to start update check' };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to start update check';
+        return { error: message };
       }
     }
     return { error: 'Auto-updater not initialized' };

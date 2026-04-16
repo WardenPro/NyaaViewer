@@ -5,38 +5,40 @@ import HomePage from './pages/HomePage';
 import SearchPage from './pages/SearchPage';
 import PlayerPage from './pages/PlayerPage';
 import SettingsPage from './pages/SettingsPage';
+import useAppStore from './store/appStore';
+import type { AutoUpdateStatusEvent } from './types/update';
 
 export default function App() {
-  const [updateStatus, setUpdateStatus] = useState<string>('');
-  const [updateProgress, setUpdateProgress] = useState<number>(0);
-  const [updateVersion, setUpdateVersion] = useState<string>('');
+  const setAllDebridApiKey = useAppStore((state) => state.setAllDebridApiKey);
+  const setPreferredSubtitleLang = useAppStore((state) => state.setPreferredSubtitleLang);
+  const [updateStatus, setUpdateStatus] = useState('');
+  const [updateProgress, setUpdateProgress] = useState(0);
 
   useEffect(() => {
     if (!window.electronAPI?.onUpdateStatus) return;
 
-    window.electronAPI.onUpdateStatus((data: { type: string; version?: string; percent?: number }) => {
+    const unsubscribe = window.electronAPI.onUpdateStatus((data: AutoUpdateStatusEvent) => {
       switch (data.type) {
         case 'checking':
-          setUpdateStatus('Checking for updates...');
+          setUpdateStatus('Recherche des mises à jour…');
           setUpdateProgress(0);
           break;
         case 'available':
-          setUpdateStatus(`Downloading update ${data.version || '...'}`);
-          setUpdateVersion(data.version || '');
+          setUpdateStatus(`Téléchargement de la mise à jour ${data.version || '…'}`);
           setUpdateProgress(0);
           break;
         case 'downloading':
           setUpdateProgress(data.percent || 0);
           break;
         case 'downloaded':
-          setUpdateStatus('Update installed! Restarting...');
+          setUpdateStatus('Mise à jour installée, redémarrage…');
           setTimeout(() => {
             setUpdateStatus('');
             window.location.reload();
           }, 2000);
           break;
         case 'error':
-          setUpdateStatus('Update failed');
+          setUpdateStatus('La mise à jour a échoué');
           setTimeout(() => setUpdateStatus(''), 5000);
           break;
         case 'not-available':
@@ -48,11 +50,38 @@ export default function App() {
     });
 
     // Auto-check on mount
-    window.electronAPI.checkForUpdates();
+    window.electronAPI.checkForUpdates().catch(() => undefined);
     // Re-check every 4 hours
-    const interval = setInterval(() => window.electronAPI.checkForUpdates(), 4 * 60 * 60 * 1000);
-    return () => clearInterval(interval);
+    const interval = setInterval(() => {
+      window.electronAPI.checkForUpdates().catch(() => undefined);
+    }, 4 * 60 * 60 * 1000);
+
+    return () => {
+      clearInterval(interval);
+      unsubscribe();
+    };
   }, []);
+
+  useEffect(() => {
+    const loadStoredPreferences = async () => {
+      const [savedApiKey, preferredSubtitleLang] = await Promise.all([
+        window.electronAPI.getAllDebridKey(),
+        window.electronAPI.getPreferredSubtitleLang(),
+      ]);
+
+      if (savedApiKey) {
+        setAllDebridApiKey(savedApiKey);
+      }
+
+      if (preferredSubtitleLang) {
+        setPreferredSubtitleLang(preferredSubtitleLang);
+      }
+    };
+
+    loadStoredPreferences().catch((error) => {
+      console.error('Impossible de charger les préférences sauvegardées :', error);
+    });
+  }, [setAllDebridApiKey, setPreferredSubtitleLang]);
 
   return (
     <Layout>

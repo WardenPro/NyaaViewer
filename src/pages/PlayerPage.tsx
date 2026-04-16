@@ -1,32 +1,33 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import useAppStore from '../store/appStore';
 import SubtitleSelector from '../components/SubtitleSelector';
+import useAppStore from '../store/appStore';
+import type { NyaaResult } from '../types/nyaa';
+import type {
+  PlayerPositionUpdateData,
+  SubtitleTrack,
+  TorrentFile,
+} from '../types/player';
+import type { WatchEntry } from '../types/storage';
 
 const VIDEO_EXTS = ['.mkv', '.mp4', '.webm', '.avi', '.mov', '.wmv'];
 
-interface SubtitleTrack {
-  id: string;
-  language: string;
-  codec: string;
-}
-
-interface TorrentFile {
-  path: string;
-  size: number;
-  id: number;
-  link?: string;
+interface PlayerLocationState {
+  torrent?: NyaaResult;
 }
 
 export default function PlayerPage() {
   const location = useLocation();
   const navigate = useNavigate();
-  const player = useAppStore((s) => s.player);
-  const setPlayerState = useAppStore((s) => s.setPlayerState);
-  const resetPlayerState = useAppStore((s) => s.resetPlayerState);
+  const player = useAppStore((state) => state.player);
+  const allDebridApiKey = useAppStore((state) => state.allDebridApiKey);
+  const preferredSubtitleLang = useAppStore((state) => state.preferredSubtitleLang);
+  const setAllDebridApiKey = useAppStore((state) => state.setAllDebridApiKey);
+  const setPlayerState = useAppStore((state) => state.setPlayerState);
+  const resetPlayerState = useAppStore((state) => state.resetPlayerState);
 
-  const torrentFromState = location.state?.torrent as any;
-  const torrent = torrentFromState || player.currentTorrent;
+  const routeState = location.state as PlayerLocationState | null;
+  const torrent = routeState?.torrent || player.currentTorrent;
 
   const [isLoading, setIsLoading] = useState(false);
   const [statusText, setStatusText] = useState('');
@@ -37,267 +38,351 @@ export default function PlayerPage() {
   const [showDebug, setShowDebug] = useState(false);
   const [debugContent, setDebugContent] = useState('');
   const [subtitleTracks, setSubtitleTracks] = useState<SubtitleTrack[]>([]);
-  const [selectedSubtitle, setSelectedSubtitle] = useState<string>('');
+  const [selectedSubtitle, setSelectedSubtitle] = useState('');
 
   const isFlowStarted = useRef(false);
+  const preferredSubtitleLangRef = useRef(preferredSubtitleLang);
+  const selectedSubtitleRef = useRef(selectedSubtitle);
+  const subtitleAutoAppliedRef = useRef(false);
 
-  // Initialize: stop any previous playback
   useEffect(() => {
-    window.electronAPI.stopPlayback();
-    return () => {
-      // Cleanup on unmount
-      if (location.pathname !== '/player') {
-        window.electronAPI.stopPlayback();
-      }
-    };
+    preferredSubtitleLangRef.current = preferredSubtitleLang;
+  }, [preferredSubtitleLang]);
+
+  useEffect(() => {
+    selectedSubtitleRef.current = selectedSubtitle;
+  }, [selectedSubtitle]);
+
+  const videoFiles = useMemo(
+    () =>
+      [...torrentFiles]
+        .filter((file) => VIDEO_EXTS.some((ext) => file.path.toLowerCase().endsWith(ext)))
+        .sort((left, right) => right.size - left.size),
+    [torrentFiles],
+  );
+
+  const resetLocalState = useCallback(() => {
+    setIsLoading(false);
+    setStatusText('');
+    setTorrentFiles([]);
+    setSelectedFile(null);
+    setError('');
+    setPollProgress(0);
+    setShowDebug(false);
+    setDebugContent('');
+    setSubtitleTracks([]);
+    setSelectedSubtitle('');
+    isFlowStarted.current = false;
+    subtitleAutoAppliedRef.current = false;
+    selectedSubtitleRef.current = '';
   }, []);
 
-  // IPC Event Listeners
+  const handleSubtitleChange = useCallback((trackId: string) => {
+    subtitleAutoAppliedRef.current = true;
+    selectedSubtitleRef.current = trackId;
+    setSelectedSubtitle(trackId);
+    void window.electronAPI.setSubtitleTrack(trackId === '' ? 'no' : trackId);
+  }, []);
+
+  const maybeApplyPreferredSubtitle = useCallback(
+    (tracks: SubtitleTrack[]) => {
+      if (subtitleAutoAppliedRef.current || selectedSubtitleRef.current || !tracks.length) {
+        return;
+      }
+
+      const preferredLang = preferredSubtitleLangRef.current;
+      const preferredTrack = tracks.find((track) => track.language === preferredLang);
+      if (!preferredTrack) {
+        return;
+      }
+
+      handleSubtitleChange(preferredTrack.id);
+    },
+    [handleSubtitleChange],
+  );
+
+  const handleStop = useCallback(
+    async (navigateToSearch = true) => {
+      await window.electronAPI.stopPlayback();
+      resetPlayerState();
+      resetLocalState();
+
+      if (navigateToSearch) {
+        navigate('/search');
+      }
+    },
+    [navigate, resetLocalState, resetPlayerState],
+  );
+
   useEffect(() => {
-    const posHandler = (data: { position: number; duration: number }) => {
+    void window.electronAPI.stopPlayback();
+    resetPlayerState();
+    resetLocalState();
+
+    return () => {
+      void window.electronAPI.stopPlayback();
+      resetPlayerState();
+    };
+  }, [resetLocalState, resetPlayerState]);
+
+  useEffect(() => {
+    const unsubscribePosition = window.electronAPI.onPlayerPositionUpdate((data: PlayerPositionUpdateData) => {
       setPlayerState({
         currentPosition: data.position,
         duration: data.duration,
       });
-    };
+    });
 
-    const tracksHandler = (tracks: any[]) => {
-      setSubtitleTracks(tracks.map((t: any) => ({
-        id: String(t.id),
-        language: t.lang || t.language || 'und',
-        codec: t.codec || 'unknown',
-      })));
-    };
+    const unsubscribeTracks = window.electronAPI.onPlayerTracksUpdate((tracks: SubtitleTrack[]) => {
+      setSubtitleTracks(tracks);
+      maybeApplyPreferredSubtitle(tracks);
+    });
 
-    const endedHandler = () => {
-      handleStop();
-    };
+    const unsubscribeEnded = window.electronAPI.onPlayerEnded(() => {
+      void handleStop();
+    });
 
-    const errorHandler = (err: string) => {
-      setError('Playback error: ' + err);
+    const unsubscribeError = window.electronAPI.onPlayerError((playerError: string) => {
+      setPlayerState({ status: 'idle' });
+      setError(`Erreur de lecture : ${playerError}`);
       setIsLoading(false);
-    };
-
-    window.electronAPI.onPlayerPositionUpdate(posHandler);
-    window.electronAPI.onPlayerTracksUpdate(tracksHandler);
-    window.electronAPI.onPlayerEnded(endedHandler);
-    window.electronAPI.onPlayerError(errorHandler);
+    });
 
     return () => {
-      // Clean listeners would be better here if API allowed
+      unsubscribePosition();
+      unsubscribeTracks();
+      unsubscribeEnded();
+      unsubscribeError();
     };
-  }, [setPlayerState]);
+  }, [handleStop, maybeApplyPreferredSubtitle, setPlayerState]);
 
-  // Periodic Watch History Update
   useEffect(() => {
     const interval = setInterval(() => {
-      if (player.isPlaying && player.currentTorrent) {
-        window.electronAPI.updateWatchPosition(
+      if (player.status !== 'idle' && player.currentTorrent) {
+        void window.electronAPI.updateWatchPosition(
           player.currentTorrent.infohash,
           player.currentPosition,
           player.duration,
         );
       }
     }, 15000);
+
     return () => clearInterval(interval);
-  }, [player.isPlaying, player.currentTorrent, player.currentPosition, player.duration]);
+  }, [player.status, player.currentTorrent, player.currentPosition, player.duration]);
 
-  const log = useCallback((...args: unknown[]) => {
-    const ts = new Date().toISOString();
-    console.log(`[PlayerPage] [${ts}]`, ...args);
-  }, []);
+  const playFile = useCallback(
+    async (file: TorrentFile, torrentData: NyaaResult) => {
+      setSelectedFile(file);
+      setIsLoading(true);
+      setError('');
+      subtitleAutoAppliedRef.current = false;
+      setSubtitleTracks([]);
+      setSelectedSubtitle('');
 
-  const startTorrentFlow = useCallback(async (torrentData: any) => {
-    log('=== startTorrentFlow ===');
-    log('Torrent data: title=' + (torrentData?.title || 'N/A'));
-    if (!torrentData || isFlowStarted.current) {
-      log('Aborted: no torrent or already started');
-      return;
-    }
-    isFlowStarted.current = true;
-    const flowStart = Date.now();
+      const fileName = file.path.split('/').pop() || file.path;
+      setStatusText(`Débridage de ${fileName}…`);
 
-    setIsLoading(true);
-    setError('');
-    setStatusText('Checking AllDebrid...');
-
-    try {
-      const apiKey = useAppStore.getState().allDebridApiKey;
-      log('API key present: ' + !!apiKey);
-      if (!apiKey) {
-        throw new Error('AllDebrid API key not configured. Please go to Settings.');
-      }
-
-      log('Step 1: Uploading magnet to AllDebrid...');
-      setStatusText('Uploading magnet...');
-      const uploadResult = await window.electronAPI.uploadMagnet(torrentData.magnetUri) as any;
-      log('Upload result: ' + JSON.stringify(uploadResult));
-      if (uploadResult.error) throw new Error(uploadResult.error);
-
-      const torrentId = uploadResult.id;
-      log(`Torrent ID: ${torrentId}, Ready: ${uploadResult.ready}`);
-
-      if (!uploadResult.ready) {
-        log('Torrent not yet ready, starting poll...');
-        setStatusText('Waiting for AllDebrid to download...');
-        let ready = false;
-        let attempts = 0;
-        const maxAttempts = 240; // 20 minutes
-
-        while (attempts < maxAttempts) {
-          await new Promise(r => setTimeout(r, 5000));
-          const status = await window.electronAPI.getTorrentStatus(torrentId) as any;
-          log(`Poll #${attempts + 1}: ${JSON.stringify(status)}`);
-
-          if (status.error) throw new Error(status.error);
-          if (status.ready) {
-            ready = true;
-            log(`Torrent is READY after ${Date.now() - flowStart} ms`);
-            break;
-          }
-
-          setStatusText(`Downloading: ${status.status || 'processing'} (${Math.round((attempts / maxAttempts) * 100)}%)`);
-          setPollProgress((attempts / maxAttempts) * 100);
-          attempts++;
+      try {
+        if (!file.link) {
+          throw new Error('Aucun lien n’est disponible pour ce fichier.');
         }
 
-        if (!ready) throw new Error('Download timed out on AllDebrid side.');
-      } else {
-        log(`Torrent was already ready/cached, elapsed: ${Date.now() - flowStart} ms`);
-      }
+        const unlock = await window.electronAPI.unlockLink(file.link);
+        if (!unlock.success || !unlock.link) {
+          throw new Error(unlock.error || 'Impossible de débrider le lien.');
+        }
 
-      log('Step 2: Fetching file list...');
-      setStatusText('Fetching file list...');
-      const files = await window.electronAPI.getTorrentFiles(torrentId) as TorrentFile[];
-      log(`Files received: ${files.length} — ` + files.map(f => f.path).join(', '));
-      setTorrentFiles(files);
+        setStatusText('Démarrage du lecteur…');
+        const playback = await window.electronAPI.startPlayback(unlock.link);
+        if (!playback.success) {
+          throw new Error(playback.error || 'Impossible de démarrer mpv.');
+        }
 
-      const videoFiles = files
-        .filter(f => VIDEO_EXTS.some(ext => f.path.toLowerCase().endsWith(ext)))
-        .sort((a, b) => b.size - a.size);
+        const watchEntry: WatchEntry = {
+          infohash: torrentData.infohash,
+          title: torrentData.title,
+          magnetUri: torrentData.magnetUri,
+          lastPosition: 0,
+          duration: 0,
+          lastWatched: new Date().toISOString(),
+        };
 
-      log(`Video files after filtering: ${videoFiles.length} — ` + videoFiles.map(f => f.path).join(', '));
+        setPlayerState({
+          status: 'playing',
+          currentTorrent: torrentData,
+          currentPosition: 0,
+          duration: 0,
+        });
 
-      if (videoFiles.length === 0) {
-        throw new Error('No video files found in this torrent.');
-      }
-
-      if (videoFiles.length === 1) {
-        log('Single video file, auto-playing...');
-        await playFile(videoFiles[0], torrentData);
-      } else {
-        log('Multiple video files, showing selection list');
-        setStatusText('Multiple video files found. Please select one.');
+        await window.electronAPI.addWatchEntry(watchEntry);
+        setStatusText('');
+        setIsLoading(false);
+      } catch (playbackError) {
+        const message = playbackError instanceof Error ? playbackError.message : 'Impossible de lancer la lecture.';
+        setPlayerState({ status: 'idle' });
+        setError(message);
         setIsLoading(false);
       }
-    } catch (e: any) {
-      log('ERROR in startTorrentFlow: ' + e.message);
-      setError(e.message);
-      setIsLoading(false);
-      isFlowStarted.current = false;
-    }
-  }, [log]);
+    },
+    [setPlayerState],
+  );
+
+  const startTorrentFlow = useCallback(
+    async (torrentData: NyaaResult) => {
+      if (!torrentData || isFlowStarted.current) {
+        return;
+      }
+
+      isFlowStarted.current = true;
+      subtitleAutoAppliedRef.current = false;
+      setIsLoading(true);
+      setError('');
+      setStatusText('Vérification d’AllDebrid…');
+      setPollProgress(0);
+      setTorrentFiles([]);
+      setSelectedFile(null);
+      setSubtitleTracks([]);
+      setSelectedSubtitle('');
+
+      try {
+        let apiKey = allDebridApiKey;
+        if (!apiKey) {
+          apiKey = (await window.electronAPI.getAllDebridKey()) || '';
+          if (apiKey) {
+            setAllDebridApiKey(apiKey);
+          }
+        }
+
+        if (!apiKey) {
+          throw new Error('Aucune clé API AllDebrid n’est configurée. Ouvrez les réglages pour en enregistrer une.');
+        }
+
+        setStatusText('Envoi du magnet à AllDebrid…');
+        const uploadResult = await window.electronAPI.uploadMagnet(torrentData.magnetUri);
+        if (uploadResult.error || !uploadResult.id) {
+          throw new Error(uploadResult.error || 'Impossible d’envoyer le magnet à AllDebrid.');
+        }
+
+        const torrentId = uploadResult.id;
+
+        if (!uploadResult.ready) {
+          setStatusText('Téléchargement sur AllDebrid…');
+          let ready = false;
+          let attempts = 0;
+          const maxAttempts = 240;
+
+          while (attempts < maxAttempts) {
+            await new Promise((resolve) => setTimeout(resolve, 5000));
+            const status = await window.electronAPI.getTorrentStatus(torrentId);
+
+            if (status.error) {
+              throw new Error(status.error);
+            }
+
+            if (status.ready) {
+              ready = true;
+              break;
+            }
+
+            attempts += 1;
+            setPollProgress((attempts / maxAttempts) * 100);
+            setStatusText(
+              `Téléchargement sur AllDebrid : ${status.status || 'en cours'} (${Math.round((attempts / maxAttempts) * 100)}%)`,
+            );
+          }
+
+          if (!ready) {
+            throw new Error('Le téléchargement a expiré côté AllDebrid.');
+          }
+        }
+
+        setStatusText('Récupération de la liste des fichiers…');
+        const files = await window.electronAPI.getTorrentFiles(torrentId);
+        setTorrentFiles(files);
+
+        const playableFiles = files
+          .filter((file) => VIDEO_EXTS.some((ext) => file.path.toLowerCase().endsWith(ext)))
+          .sort((left, right) => right.size - left.size);
+
+        if (!playableFiles.length) {
+          throw new Error('Aucun fichier vidéo n’a été trouvé dans ce torrent.');
+        }
+
+        if (playableFiles.length === 1) {
+          await playFile(playableFiles[0], torrentData);
+          return;
+        }
+
+        isFlowStarted.current = false;
+        setStatusText('');
+        setPollProgress(0);
+        setIsLoading(false);
+      } catch (flowError) {
+        const message = flowError instanceof Error ? flowError.message : 'Une erreur est survenue pendant la préparation du torrent.';
+        isFlowStarted.current = false;
+        setError(message);
+        setIsLoading(false);
+      }
+    },
+    [allDebridApiKey, playFile, setAllDebridApiKey],
+  );
 
   useEffect(() => {
-    if (torrent && !isLoading && torrentFiles.length === 0 && !player.isPlaying) {
-      startTorrentFlow(torrent);
+    if (torrent && !isLoading && player.status === 'idle' && !torrentFiles.length && !isFlowStarted.current) {
+      void startTorrentFlow(torrent);
     }
-  }, [torrent, startTorrentFlow, isLoading, torrentFiles.length, player.isPlaying]);
-
-  const playFile = async (file: TorrentFile, torrentData: any) => {
-    setSelectedFile(file);
-    setIsLoading(true);
-    setError('');
-    const fileName = file.path.split('/').pop() || file.path;
-    log(`=== playFile === file: ${fileName} link present: ${!!file.link}`);
-    setStatusText(`Unlocking: ${fileName}`);
-
-    try {
-      if (!file.link) throw new Error('No link available for this file.');
-
-      log('Step 3: Unlocking link...');
-      const unlock = await window.electronAPI.unlockLink(file.link) as any;
-      log('Unlock result: ' + JSON.stringify(unlock));
-      if (!unlock.success) throw new Error(unlock.error || 'Failed to unlock link');
-      log('Unlocked URL (first 100): ' + (unlock.link || '').substring(0, 100));
-
-      log('Step 4: Starting playback...');
-      setStatusText('Starting mpv...');
-      const playback = await window.electronAPI.startPlayback(unlock.link) as any;
-      log('Start playback result:', JSON.stringify(playback));
-      if (!playback.success) throw new Error(playback.error || 'Failed to start mpv');
-
-      log('Step 5: Setting player state to playing');
-      setPlayerState({
-        isPlaying: true,
-        currentTorrent: torrentData,
-      });
-
-      // Save initial watch entry
-      window.electronAPI.addWatchEntry({
-        infohash: torrentData.infohash,
-        title: torrentData.title,
-        magnetUri: torrentData.magnetUri,
-        lastPosition: 0,
-        duration: 0,
-        lastWatched: new Date().toISOString()
-      });
-
-      log('=== playFile completed OK ===');
-      setIsLoading(false);
-      setStatusText('');
-    } catch (e: any) {
-      log('ERROR in playFile:', e.message);
-      setError(e.message);
-      setIsLoading(false);
-    }
-  };
-
-  const handleStop = async () => {
-    await window.electronAPI.stopPlayback();
-    resetPlayerState();
-    navigate('/search');
-  };
+  }, [torrent, isLoading, player.status, startTorrentFlow, torrentFiles.length]);
 
   const handlePause = async () => {
     await window.electronAPI.pausePlayback();
-    setPlayerState({ isPlaying: !player.isPlaying });
+    setPlayerState({ status: player.status === 'playing' ? 'paused' : 'playing' });
   };
 
   const handleSeek = (position: number) => {
-    window.electronAPI.seekPlayback(position);
+    void window.electronAPI.seekPlayback(position);
     setPlayerState({ currentPosition: position });
   };
 
-  const handleSubtitleChange = (trackId: string) => {
-    setSelectedSubtitle(trackId);
-    window.electronAPI.setSubtitleTrack(trackId === '' ? 'no' : trackId);
+  const handleRetry = async () => {
+    setError('');
+
+    if (selectedFile && torrent) {
+      await playFile(selectedFile, torrent);
+      return;
+    }
+
+    if (torrent) {
+      await startTorrentFlow(torrent);
+    }
+  };
+
+  const handleDebugToggle = async () => {
+    const nextValue = !showDebug;
+    setShowDebug(nextValue);
+
+    if (nextValue && !debugContent) {
+      setDebugContent((await window.electronAPI.getDebugFile()) || 'Aucune information de débogage disponible.');
+    }
   };
 
   if (isLoading) {
     return (
       <div className="flex flex-col items-center justify-center h-full p-8 space-y-6">
         <div className="relative w-24 h-24">
-          <div className="absolute inset-0 border-4 border-primary/20 rounded-full"></div>
-          <div className="absolute inset-0 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+          <div className="absolute inset-0 border-4 border-primary/20 rounded-full" />
+          <div className="absolute inset-0 border-4 border-primary border-t-transparent rounded-full animate-spin" />
         </div>
         <div className="text-center space-y-2">
-          <h2 className="text-xl font-bold text-white">{torrent?.title || 'Loading...'}</h2>
+          <h2 className="text-xl font-bold text-white">{torrent?.title || 'Chargement…'}</h2>
           <p className="text-dark-textMuted animate-pulse">{statusText}</p>
         </div>
         {pollProgress > 0 && (
           <div className="w-full max-w-md bg-dark-border h-2 rounded-full overflow-hidden">
-            <div 
-              className="bg-primary h-full transition-all duration-500" 
-              style={{ width: `${pollProgress}%` }}
-            ></div>
+            <div className="bg-primary h-full transition-all duration-500" style={{ width: `${pollProgress}%` }} />
           </div>
         )}
-        <button 
-          onClick={() => navigate('/search')}
-          className="btn-secondary mt-4"
-        >
-          Cancel
+        <button onClick={() => void handleStop()} className="btn-secondary mt-4">
+          Annuler
         </button>
       </div>
     );
@@ -313,24 +398,18 @@ export default function PlayerPage() {
             </svg>
           </div>
           <div className="space-y-2">
-            <h2 className="text-2xl font-bold text-red-400">Streaming Error</h2>
+            <h2 className="text-2xl font-bold text-red-400">Erreur de lecture</h2>
             <p className="text-dark-textMuted break-words">{error}</p>
           </div>
           <div className="flex flex-wrap justify-center gap-4">
-            <button onClick={() => { isFlowStarted.current = false; startTorrentFlow(torrent); }} className="btn-primary">
-              Try Again
+            <button onClick={() => void handleRetry()} className="btn-primary">
+              Réessayer
             </button>
-            <button onClick={() => navigate('/search')} className="btn-secondary">
-              Back to Search
+            <button onClick={() => void handleStop()} className="btn-secondary">
+              Retour à la recherche
             </button>
-            <button 
-              onClick={async () => {
-                setShowDebug(!showDebug);
-                if (!debugContent) setDebugContent(await window.electronAPI.getDebugFile() || 'No debug data');
-              }} 
-              className="btn-secondary"
-            >
-              {showDebug ? 'Hide Debug' : 'Debug Info'}
+            <button onClick={() => void handleDebugToggle()} className="btn-secondary">
+              {showDebug ? 'Masquer le debug' : 'Informations de debug'}
             </button>
           </div>
           {showDebug && (
@@ -343,37 +422,31 @@ export default function PlayerPage() {
     );
   }
 
-  if (torrentFiles.length > 0 && !player.isPlaying) {
-    const videoFiles = torrentFiles
-      .filter(f => VIDEO_EXTS.some(ext => f.path.toLowerCase().endsWith(ext)))
-      .sort((a, b) => b.size - a.size);
-
+  if (videoFiles.length > 1 && !selectedFile && player.status === 'idle') {
     return (
       <div className="p-8 h-full flex flex-col max-w-4xl mx-auto space-y-6">
         <div className="flex items-center justify-between">
           <h2 className="text-2xl font-bold truncate pr-4">{torrent?.title}</h2>
-          <button onClick={() => navigate('/search')} className="text-dark-textMuted hover:text-white transition-colors">
-            Cancel
+          <button onClick={() => void handleStop()} className="text-dark-textMuted hover:text-white transition-colors">
+            Annuler
           </button>
         </div>
-        
-        <p className="text-dark-textMuted">This torrent contains multiple video files. Select the one you want to play:</p>
-        
+
+        <p className="text-dark-textMuted">Ce torrent contient plusieurs fichiers vidéo. Choisissez celui que vous voulez lire :</p>
+
         <div className="flex-1 overflow-y-auto space-y-3 pr-2 custom-scrollbar">
           {videoFiles.map((file) => (
             <button
               key={file.id}
-              onClick={() => playFile(file, torrent)}
+              onClick={() => torrent && void playFile(file, torrent)}
               className="w-full text-left p-4 card flex justify-between items-center hover:border-primary/50 group transition-all"
             >
               <div className="min-w-0 flex-1">
                 <p className="font-medium truncate group-hover:text-primary transition-colors">{file.path}</p>
-                <p className="text-sm text-dark-textMuted mt-1">
-                  {(file.size / (1024 * 1024 * 1024)).toFixed(2)} GB
-                </p>
+                <p className="text-sm text-dark-textMuted mt-1">{formatFileSize(file.size)}</p>
               </div>
               <svg className="w-6 h-6 text-primary opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M8 5v14l11-7z"/>
+                <path d="M8 5v14l11-7z" />
               </svg>
             </button>
           ))}
@@ -382,28 +455,27 @@ export default function PlayerPage() {
     );
   }
 
-  if (player.isPlaying) {
+  if (torrent && player.status !== 'idle') {
     return (
       <div className="flex h-full gap-6 p-8 overflow-hidden">
-        {/* Main Controls */}
         <div className="flex-1 flex flex-col items-center justify-center space-y-8 min-w-0">
           <div className="text-center space-y-4 max-w-full">
             <div className="relative inline-block">
               <div className="w-24 h-24 bg-primary/10 rounded-full flex items-center justify-center animate-pulse">
                 <svg className="w-12 h-12 text-primary" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M8 5v14l11-7z"/>
+                  <path d="M8 5v14l11-7z" />
                 </svg>
               </div>
               <div className="absolute -bottom-2 -right-2 w-8 h-8 bg-green-500 rounded-full border-4 border-dark-bg flex items-center justify-center">
-                <div className="w-2 h-2 bg-white rounded-full"></div>
+                <div className="w-2 h-2 bg-white rounded-full" />
               </div>
             </div>
-            
+
             <div className="space-y-2">
               <h2 className="text-2xl font-bold text-white truncate">{player.currentTorrent?.title}</h2>
               {selectedFile && (
                 <p className="text-dark-textMuted italic truncate">
-                  Playing: {selectedFile.path.split('/').pop()}
+                  Lecture : {selectedFile.path.split('/').pop()}
                 </p>
               )}
             </div>
@@ -422,50 +494,49 @@ export default function PlayerPage() {
                   max={player.duration || 100}
                   step={0.1}
                   value={player.currentPosition}
-                  onChange={(e) => handleSeek(Number(e.target.value))}
+                  onChange={(event) => handleSeek(Number(event.target.value))}
                   className="w-full h-1.5 bg-dark-border rounded-full appearance-none cursor-pointer accent-primary"
                 />
               </div>
             </div>
 
             <div className="flex items-center justify-center gap-8">
-              <button 
-                onClick={handlePause}
+              <button
+                onClick={() => void handlePause()}
                 className="w-16 h-16 rounded-full bg-white text-black hover:bg-primary hover:text-white transition-all flex items-center justify-center shadow-lg transform hover:scale-110 active:scale-95"
               >
-                {player.isPlaying ? (
+                {player.status === 'playing' ? (
                   <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+                    <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
                   </svg>
                 ) : (
                   <svg className="w-8 h-8 ml-1" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M8 5v14l11-7z"/>
+                    <path d="M8 5v14l11-7z" />
                   </svg>
                 )}
               </button>
-              <button 
-                onClick={handleStop}
+              <button
+                onClick={() => void handleStop()}
                 className="w-12 h-12 rounded-full bg-dark-border text-white hover:bg-red-500 transition-all flex items-center justify-center transform hover:scale-110 active:scale-95"
               >
                 <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M6 6h12v12H6z"/>
+                  <path d="M6 6h12v12H6z" />
                 </svg>
               </button>
             </div>
 
             <p className="text-center text-sm text-dark-textMuted">
-              Use the separate mpv window for full-screen and advanced controls.
+              Utilisez la fenêtre mpv séparée pour le plein écran et les contrôles avancés.
             </p>
           </div>
         </div>
 
-        {/* Sidebar for Subtitles */}
         {subtitleTracks.length > 0 && (
           <div className="w-64 flex flex-col">
-            <SubtitleSelector 
-              tracks={subtitleTracks} 
-              selectedTrack={selectedSubtitle} 
-              onSelect={handleSubtitleChange} 
+            <SubtitleSelector
+              tracks={subtitleTracks}
+              selectedTrack={selectedSubtitle}
+              onSelect={handleSubtitleChange}
             />
           </div>
         )}
@@ -476,11 +547,26 @@ export default function PlayerPage() {
   return null;
 }
 
+function formatFileSize(size: number): string {
+  if (size <= 0) {
+    return 'Taille inconnue';
+  }
+
+  return `${(size / (1024 * 1024 * 1024)).toFixed(2)} Go`;
+}
+
 function formatTime(seconds: number): string {
-  if (!seconds || isNaN(seconds) || !isFinite(seconds)) return '0:00';
+  if (!seconds || Number.isNaN(seconds) || !Number.isFinite(seconds)) {
+    return '0:00';
+  }
+
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = Math.floor(seconds % 60);
-  if (h > 0) return h + ':' + m.toString().padStart(2, '0') + ':' + s.toString().padStart(2, '0');
-  return m + ':' + s.toString().padStart(2, '0');
+
+  if (h > 0) {
+    return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  }
+
+  return `${m}:${s.toString().padStart(2, '0')}`;
 }

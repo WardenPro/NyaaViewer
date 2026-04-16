@@ -39,9 +39,10 @@ export function registerPlayerHandlers(): void {
       const result = await mpvService.startPlayback(url);
       console.log('[IPC/player] start-playback result:', JSON.stringify(result));
       return result;
-    } catch (e: any) {
-      console.error('[IPC/player] start-playback exception:', e.message);
-      return { success: false, error: e.message };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Failed to start playback';
+      console.error('[IPC/player] start-playback exception:', message);
+      return { success: false, error: message };
     }
   });
 

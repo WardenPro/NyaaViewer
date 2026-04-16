@@ -2,6 +2,7 @@
  * Test script for AllDebrid API v4/v4.1 integration.
  *
  * Usage:
+ *   AD_API_KEY=... node scripts/test-alldebrid.js [magnet_uri]
  *   node scripts/test-alldebrid.js <AD_API_KEY> [magnet_uri]
  *
  * Runs through the full AD magnet flow: upload → status → files → unlock.
@@ -9,28 +10,18 @@
  */
 
 const axios = require('axios');
-const path = require('path');
-const fs = require('fs');
-
 const BASE = 'https://api.alldebrid.com';
 const DEFAULT_MAGNET = 'magnet:?xt=urn:btih:36FBBF3C0E0F7F62F84276B094E780883695227E&dn=Big+Buck+Bunny&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce';
 
-let apiKey = process.argv[2];
-let magnetUri = process.argv[3] || DEFAULT_MAGNET;
+const firstArg = process.argv[2];
+let apiKey = firstArg && firstArg.startsWith('magnet:') ? process.env.AD_API_KEY : firstArg || process.env.AD_API_KEY;
+let magnetUri = firstArg && firstArg.startsWith('magnet:') ? firstArg : process.argv[3] || DEFAULT_MAGNET;
 
 if (!apiKey) {
-  // Try to read from config
-  const configDir = path.join(process.env.HOME || process.env.USERPROFILE || '', '.nyaa-viewer');
-  const configPath = path.join(configDir, 'config.json');
-  try {
-    const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    apiKey = cfg.allDebridApiKey;
-  } catch {
-    console.error('ERROR: No API key provided.');
-    console.error('Usage: node scripts/test-alldebrid.js <AD_API_KEY> [magnet_uri]');
-    console.error('Or set the key in ~/.nyaa-viewer/config.json as { "allDebridApiKey": "..." }');
-    process.exit(1);
-  }
+  console.error('ERROR: No API key provided.');
+  console.error('Usage: AD_API_KEY=... node scripts/test-alldebrid.js [magnet_uri]');
+  console.error('   or: node scripts/test-alldebrid.js <AD_API_KEY> [magnet_uri]');
+  process.exit(1);
 }
 
 function log(label, data) {

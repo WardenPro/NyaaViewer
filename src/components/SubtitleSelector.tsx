@@ -11,17 +11,17 @@ interface SubtitleSelectorProps {
 }
 
 const languageNames: Record<string, string> = {
-  en: 'English',
-  fr: 'French',
-  es: 'Spanish',
-  ja: 'Japanese',
-  de: 'German',
-  pt: 'Portuguese',
-  it: 'Italian',
-  zh: 'Chinese',
-  ko: 'Korean',
-  ru: 'Russian',
-  ar: 'Arabic',
+  en: 'Anglais',
+  fr: 'Français',
+  es: 'Espagnol',
+  ja: 'Japonais',
+  de: 'Allemand',
+  pt: 'Portugais',
+  it: 'Italien',
+  zh: 'Chinois',
+  ko: 'Coréen',
+  ru: 'Russe',
+  ar: 'Arabe',
 };
 
 export default function SubtitleSelector({
@@ -31,7 +31,7 @@ export default function SubtitleSelector({
 }: SubtitleSelectorProps) {
   return (
     <div className="card space-y-3">
-      <h4 className="text-sm font-semibold">Subtitles</h4>
+      <h4 className="text-sm font-semibold">Sous-titres</h4>
 
       {/* Off option */}
       <button
@@ -42,7 +42,7 @@ export default function SubtitleSelector({
             : 'text-dark-textMuted hover:text-white'
         }`}
       >
-        Off
+        Désactivés
       </button>
 
       {/* Track list */}

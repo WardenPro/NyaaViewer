@@ -52,7 +52,7 @@ npm run dev
 | `npm run build:linux` | Linux AppImage |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run preview` | Vite production preview |
-| `npm run download-binaries` | Download mpv for current platform |
+| `npm run download-binaries` | Download mpv and mediainfo for the current platform |
 
 ## Architecture
 
@@ -133,13 +133,12 @@ NyaaViewer/
 │   └── download-binaries.js   # Platform-specific mpv/mediainfo download
 ├── bin/                       # Bundled binaries (mpv, mediainfo)
 ├── release/                   # electron-builder output
-├── electron-builder.yml       # Build config for all platforms
 ├── vite.config.ts             # Vite + electron plugin config
 ├── tsconfig.json              # TypeScript configuration
 ├── tailwind.config.js         # Dark theme color palette
 ├── postcss.config.js          # Tailwind + autoprefixer
 ├── index.html                 # HTML shell with CSP
-└── package.json               # Dependencies + scripts
+└── package.json               # Dependencies, scripts, and electron-builder config
 ```
 
 ## Requirements

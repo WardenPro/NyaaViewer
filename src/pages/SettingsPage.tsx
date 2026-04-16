@@ -1,15 +1,26 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import useAppStore from '../store/appStore';
+import type { VerifyAllDebridKeyResult } from '../types/alldebrid';
+import type { AutoUpdateStatusEvent } from '../types/update';
+
+const SUBTITLE_LANGUAGES = [
+  { value: 'en', label: 'Anglais' },
+  { value: 'fr', label: 'Français' },
+  { value: 'es', label: 'Espagnol' },
+  { value: 'ja', label: 'Japonais' },
+  { value: 'de', label: 'Allemand' },
+  { value: 'pt', label: 'Portugais' },
+  { value: 'it', label: 'Italien' },
+];
 
 export default function SettingsPage() {
-  const allDebridApiKey = useAppStore((s) => s.allDebridApiKey);
-  const isADConnected = useAppStore((s) => s.isADConnected);
-  const adUsername = useAppStore((s) => s.adUsername);
-  const preferredSubtitleLang = useAppStore((s) => s.preferredSubtitleLang);
-  const setAllDebridApiKey = useAppStore((s) => s.setAllDebridApiKey);
-  const setADConnected = useAppStore((s) => s.setADConnected);
-  const setPreferredSubtitleLang = useAppStore((s) => s.setPreferredSubtitleLang);
-  const setIsSearching = useAppStore((s) => s.setIsSearching);
+  const allDebridApiKey = useAppStore((state) => state.allDebridApiKey);
+  const isADConnected = useAppStore((state) => state.isADConnected);
+  const adUsername = useAppStore((state) => state.adUsername);
+  const preferredSubtitleLang = useAppStore((state) => state.preferredSubtitleLang);
+  const setAllDebridApiKey = useAppStore((state) => state.setAllDebridApiKey);
+  const setADConnected = useAppStore((state) => state.setADConnected);
+  const setPreferredSubtitleLang = useAppStore((state) => state.setPreferredSubtitleLang);
 
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [testingKey, setTestingKey] = useState(false);
@@ -19,130 +30,143 @@ export default function SettingsPage() {
   const [appVersion, setAppVersion] = useState('0.1.0');
 
   useEffect(() => {
-    setApiKeyInput(allDebridApiKey);
-    loadSavedApiKey();
+    const loadSettings = async () => {
+      const [savedKey, savedSubtitleLang, version] = await Promise.all([
+        window.electronAPI.getAllDebridKey(),
+        window.electronAPI.getPreferredSubtitleLang(),
+        window.electronAPI.getAppVersion(),
+      ]);
+
+      if (savedKey) {
+        setApiKeyInput(savedKey);
+        setAllDebridApiKey(savedKey);
+        await testConnection(savedKey, false);
+      } else {
+        setApiKeyInput(allDebridApiKey);
+      }
+
+      if (savedSubtitleLang) {
+        setPreferredSubtitleLang(savedSubtitleLang);
+      }
+
+      setAppVersion(version);
+    };
+
+    loadSettings().catch((error) => {
+      console.error('Impossible de charger les réglages :', error);
+    });
   }, []);
 
-  // Load app version
   useEffect(() => {
-    window.electronAPI.getAppVersion().then(v => setAppVersion(v));
-  }, []);
+    if (!window.electronAPI?.onUpdateStatus) {
+      return;
+    }
 
-  // Auto-update status listener
-  useEffect(() => {
-    if (!window.electronAPI?.onUpdateStatus) return;
-
-    window.electronAPI.onUpdateStatus((data: { type: string; version?: string; percent?: number; message?: string }) => {
+    const unsubscribe = window.electronAPI.onUpdateStatus((data: AutoUpdateStatusEvent) => {
       switch (data.type) {
         case 'checking':
-          setUpdateStatus('Checking...');
+          setUpdateStatus('Recherche des mises à jour…');
           setUpdateProgress(0);
           break;
         case 'available':
-          setUpdateStatus(`Downloading v${data.version || '?'}...`);
+          setUpdateStatus(`Téléchargement de la version ${data.version || '?'}…`);
           setUpdateProgress(0);
           break;
         case 'downloading':
           setUpdateProgress(Math.round(data.percent || 0));
           break;
         case 'downloaded':
-          setUpdateStatus('Update installed, restarting...');
+          setUpdateStatus('Mise à jour installée, redémarrage…');
           setTimeout(() => window.location.reload(), 2000);
           break;
         case 'not-available':
-          setUpdateStatus('Already up to date');
+          setUpdateStatus('L’application est déjà à jour');
           setUpdateProgress(0);
           break;
         case 'error':
-          setUpdateStatus(`Error: ${data.message || 'Update check failed'}`);
+          setUpdateStatus(`Erreur : ${data.message || 'échec de la recherche de mise à jour'}`);
           setUpdateProgress(0);
+          break;
+        default:
           break;
       }
     });
+
+    return unsubscribe;
   }, []);
 
   const handleCheckUpdates = async () => {
-    setUpdateStatus('Checking for updates...');
+    setUpdateStatus('Recherche des mises à jour…');
     try {
-      const result = await window.electronAPI.checkForUpdates() as { checking?: boolean; error?: string };
+      const result = await window.electronAPI.checkForUpdates();
       if (result.error) {
-        setUpdateStatus(`Error: ${result.error}`);
+        setUpdateStatus(`Erreur : ${result.error}`);
       }
-    } catch (e: any) {
-      setUpdateStatus(`Error: ${e?.message || 'Update check failed'}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'échec de la recherche de mise à jour';
+      setUpdateStatus(`Erreur : ${message}`);
     }
   };
 
-  const loadSavedApiKey = async () => {
-    try {
-      const savedKey = await window.electronAPI.getAllDebridKey();
-      if (savedKey) {
-        setApiKeyInput(savedKey);
-        setAllDebridApiKey(savedKey);
-        // Auto-test saved key
-        testConnection(savedKey);
-      }
-    } catch (e) {
-      console.error('Failed to load saved key:', e);
-    }
-  };
-
-  const testConnection = async (key: string) => {
+  const testConnection = async (key: string, persistKey = true) => {
     setTestingKey(true);
     setTestError('');
-    try {
-      const result = await window.electronAPI.verifyAllDebridKey(key);
-      const data = result as { success: boolean; error?: string; username?: string };
 
-      if (data.success) {
-        setADConnected(true, data.username);
+    try {
+      const result: VerifyAllDebridKeyResult = await window.electronAPI.verifyAllDebridKey(key);
+
+      if (result.success) {
+        setADConnected(true, result.username);
         setAllDebridApiKey(key);
-        // Persist the key
-        await window.electronAPI.setAllDebridKey(key);
+        if (persistKey) {
+          await window.electronAPI.setAllDebridKey(key);
+        }
       } else {
         setADConnected(false);
-        setTestError(data.error || 'Connection failed');
+        setTestError(result.error || 'Connexion impossible');
       }
-    } catch (e: any) {
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Connexion impossible';
       setADConnected(false);
-      setTestError(e?.message || 'Connection failed');
+      setTestError(message);
     } finally {
       setTestingKey(false);
     }
   };
 
   const handleSave = () => {
-    if (apiKeyInput.trim()) {
-      testConnection(apiKeyInput.trim());
+    const trimmedKey = apiKeyInput.trim();
+    if (!trimmedKey) {
+      return;
+    }
+
+    void testConnection(trimmedKey);
+  };
+
+  const handleSubtitlePreferenceChange = async (lang: string) => {
+    setPreferredSubtitleLang(lang);
+    try {
+      await window.electronAPI.setPreferredSubtitleLang(lang);
+    } catch (error) {
+      console.error('Impossible d’enregistrer la langue de sous-titres :', error);
     }
   };
 
-  const subLanguages = [
-    { value: 'en', label: 'English' },
-    { value: 'fr', label: 'French' },
-    { value: 'es', label: 'Spanish' },
-    { value: 'ja', label: 'Japanese' },
-    { value: 'de', label: 'German' },
-    { value: 'pt', label: 'Portuguese' },
-    { value: 'it', label: 'Italian' },
-  ];
-
   return (
     <div className="p-6 max-w-2xl space-y-8">
-      <h2 className="text-2xl font-bold">Settings</h2>
+      <h2 className="text-2xl font-bold">Réglages</h2>
 
-      {/* AllDebrid */}
       <div className="card space-y-4">
         <h3 className="text-lg font-semibold">AllDebrid</h3>
 
         <div className="space-y-2">
-          <label className="text-sm text-dark-textMuted">API Key</label>
+          <label className="text-sm text-dark-textMuted">Clé API</label>
           <div className="flex gap-2">
             <input
               type="password"
               value={apiKeyInput}
-              onChange={(e) => setApiKeyInput(e.target.value)}
-              placeholder="Enter your AllDebrid API key"
+              onChange={(event) => setApiKeyInput(event.target.value)}
+              placeholder="Entrez votre clé API AllDebrid"
               className="input-field flex-1"
             />
             <button
@@ -150,41 +174,36 @@ export default function SettingsPage() {
               disabled={testingKey || !apiKeyInput.trim()}
               className="btn-primary"
             >
-              {testingKey ? 'Testing...' : 'Test & Save'}
+              {testingKey ? 'Vérification…' : 'Tester et enregistrer'}
             </button>
           </div>
         </div>
 
-        {/* Connection status */}
         {isADConnected && (
           <div className="text-sm text-green-400 flex items-center gap-2">
             <span>&#10003;</span>
-            Connected as {adUsername}
+            Connecté en tant que {adUsername}
           </div>
         )}
 
-        {testError && (
-          <div className="text-sm text-red-400">{testError}</div>
-        )}
+        {testError && <div className="text-sm text-red-400">{testError}</div>}
 
         <p className="text-xs text-dark-textMuted">
-          Get your API key from{' '}
-          <span className="text-primary">alldebrid.com/account</span>
+          Récupérez votre clé API sur <span className="text-primary">alldebrid.com/account</span>
         </p>
       </div>
 
-      {/* Subtitle preferences */}
       <div className="card space-y-4">
-        <h3 className="text-lg font-semibold">Subtitle Preferences</h3>
+        <h3 className="text-lg font-semibold">Préférences de sous-titres</h3>
 
         <div className="space-y-2">
-          <label className="text-sm text-dark-textMuted">Default subtitle language</label>
+          <label className="text-sm text-dark-textMuted">Langue par défaut</label>
           <select
             value={preferredSubtitleLang}
-            onChange={(e) => setPreferredSubtitleLang(e.target.value)}
+            onChange={(event) => void handleSubtitlePreferenceChange(event.target.value)}
             className="input-field"
           >
-            {subLanguages.map((lang) => (
+            {SUBTITLE_LANGUAGES.map((lang) => (
               <option key={lang.value} value={lang.value}>
                 {lang.label}
               </option>
@@ -193,20 +212,17 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* About */}
       <div className="card space-y-3">
-        <h3 className="text-lg font-semibold">About</h3>
+        <h3 className="text-lg font-semibold">À propos</h3>
         <p className="text-sm text-dark-textMuted">NyaaViewer v{appVersion}</p>
         <p className="text-xs text-dark-textMuted">
-          Search nyaa.si torrents, deborid via AllDebrid, and stream MKV files with subtitles.
+          Recherchez des torrents sur nyaa.si, débridez-les via AllDebrid et lisez-les avec leurs sous-titres.
         </p>
         <div className="flex items-center gap-3 pt-2 border-t border-dark-border">
           <button onClick={handleCheckUpdates} className="btn-secondary text-sm py-1.5 px-4">
-            Check for Updates
+            Vérifier les mises à jour
           </button>
-          {updateStatus && (
-            <div className="text-sm text-dark-textMuted">{updateStatus}</div>
-          )}
+          {updateStatus && <div className="text-sm text-dark-textMuted">{updateStatus}</div>}
           {updateProgress > 0 && updateProgress < 100 && (
             <div className="flex-1 bg-dark-border rounded-full h-1.5">
               <div

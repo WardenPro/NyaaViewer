@@ -1,30 +1,10 @@
 import { XMLParser } from 'fast-xml-parser';
+import type { NyaaResult, NyaaSearchOptions } from '../../src/types/nyaa';
 
 const NYAA_BASE = 'https://nyaa.si';
 const NYAA_RSS = `${NYAA_BASE}/?page=rss`;
-const NYAA_SEARCH_RSS = `${NYAA_BASE}/?page=rss&q=`;
 
-export interface NyaaTorrent {
-  title: string;
-  size: string;
-  seeders: number;
-  leechers: number;
-  date: string;
-  infohash: string;
-  magnetUri: string;
-  resolution?: string;
-  categoryId?: string;
-}
-
-export interface NyaaSearchOptions {
-  category?: string;
-  filter?: number; // 0: No filter, 1: No remakes, 2: Trusted only
-  sort?: string;
-  order?: string;
-  resolution?: string;
-}
-
-export async function searchNyaa(query: string, options: NyaaSearchOptions = {}): Promise<NyaaTorrent[]> {
+export async function searchNyaa(query: string, options: NyaaSearchOptions = {}): Promise<NyaaResult[]> {
   const params = new URLSearchParams({
     page: 'rss',
     q: query + (options.resolution ? ` ${options.resolution}p` : ''),
@@ -57,7 +37,7 @@ export async function searchNyaa(query: string, options: NyaaSearchOptions = {})
   }
 }
 
-export async function getTrending(): Promise<NyaaTorrent[]> {
+export async function getTrending(): Promise<NyaaResult[]> {
   try {
     const response = await fetch(NYAA_RSS, {
       headers: {
@@ -114,7 +94,7 @@ interface RSSFeed {
   };
 }
 
-function parseNyaaRSS(xml: string): NyaaTorrent[] {
+function parseNyaaRSS(xml: string): NyaaResult[] {
   const parser = new XMLParser({
     ignoreAttributes: false,
     attributeNamePrefix: '',
@@ -172,9 +152,9 @@ function parseNyaaRSS(xml: string): NyaaTorrent[] {
         infohash,
         magnetUri,
         resolution,
-        categoryId: item['nyaa:categoryId'] || item.category ? String(item.category) : undefined,
+        categoryId: item['nyaa:categoryId'] || (item.category ? String(item.category) : undefined),
       };
-    }).filter((t: NyaaTorrent) => t.infohash && t.infohash.length === 40);
+    }).filter((torrent: NyaaResult) => torrent.infohash && torrent.infohash.length === 40);
   } catch (e) {
     console.error('Failed to parse Nyaa RSS:', e);
     return [];

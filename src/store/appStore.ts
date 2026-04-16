@@ -1,39 +1,7 @@
 import { create } from 'zustand';
-
-// Types
-export interface NyaaResult {
-  title: string;
-  size: string;
-  seeders: number;
-  leechers: number;
-  date: string;
-  infohash: string;
-  magnetUri: string;
-  resolution?: string;
-}
-
-export interface TorrentFile {
-  path: string;
-  size: number;
-  id: number;
-}
-
-export interface WatchEntry {
-  infohash: string;
-  title: string;
-  lastPosition: number;
-  duration: number;
-  lastWatched: string;
-  magnetUri: string;
-  selectedSubtitle?: { id: string; language: string };
-}
-
-export interface PlayerState {
-  isPlaying: boolean;
-  currentTorrent: NyaaResult | null;
-  currentPosition: number;
-  duration: number;
-}
+import type { NyaaResult } from '../types/nyaa';
+import type { PlayerState } from '../types/player';
+import type { WatchEntry } from '../types/storage';
 
 interface AppStore {
   // Search
@@ -63,6 +31,7 @@ interface AppStore {
   // Watch History
   watchHistory: WatchEntry[];
   setWatchHistory: (history: WatchEntry[]) => void;
+  removeWatchEntry: (infohash: string) => void;
   updateHistoryPosition: (infohash: string, position: number, duration: number) => void;
 
   // Subtitle preference
@@ -85,7 +54,7 @@ const useAppStore = create<AppStore>()((set) => ({
 
   // Player
   player: {
-    isPlaying: false,
+    status: 'idle',
     currentTorrent: null,
     currentPosition: 0,
     duration: 0,
@@ -97,7 +66,7 @@ const useAppStore = create<AppStore>()((set) => ({
   resetPlayerState: () =>
     set({
       player: {
-        isPlaying: false,
+        status: 'idle',
         currentTorrent: null,
         currentPosition: 0,
         duration: 0,
@@ -115,6 +84,10 @@ const useAppStore = create<AppStore>()((set) => ({
   // Watch History
   watchHistory: [],
   setWatchHistory: (history) => set({ watchHistory: history }),
+  removeWatchEntry: (infohash) =>
+    set((prev) => ({
+      watchHistory: prev.watchHistory.filter((entry) => entry.infohash !== infohash),
+    })),
   updateHistoryPosition: (infohash, position, duration) =>
     set((prev) => {
       const existing = prev.watchHistory.find((e) => e.infohash === infohash);

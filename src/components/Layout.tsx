@@ -6,9 +6,9 @@ interface LayoutProps {
 }
 
 const navItems = [
-  { path: '/', label: 'Home', icon: '🏠' },
-  { path: '/search', label: 'Search', icon: '🔍' },
-  { path: '/settings', label: 'Settings', icon: '⚙️' },
+  { path: '/', label: 'Accueil', icon: '🏠' },
+  { path: '/search', label: 'Recherche', icon: '🔍' },
+  { path: '/settings', label: 'Réglages', icon: '⚙️' },
 ];
 
 export default function Layout({ children }: LayoutProps) {

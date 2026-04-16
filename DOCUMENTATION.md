@@ -115,7 +115,7 @@ The user never downloads torrent files locally. Instead:
 | `npm run build` | Downloads binaries → `tsc` → `vite build` → `electron-builder` (all platforms) |
 | `npm run build:win` | Same as build but `electron-builder --win` (NSIS installer) |
 | `npm run build:mac` | Same as build but `electron-builder --mac` (DMG + zip) |
-| `npm run build:lintest` | Same as build but `electron-builder --linux` (AppImage) |
+| `npm run build:linux` | Same as build but `electron-builder --linux` (AppImage) |
 | `npm run preview` | `vite preview` — serve production build locally |
 | `npm run typecheck` | `tsc --noEmit` — type check without emitting |
 | `npm run download-binaries` | Runs `scripts/download-binaries.js` to fetch mpv/mediainfo |
@@ -157,20 +157,9 @@ The user never downloads torrent files locally. Instead:
 - `vite-plugin-electron-renderer` enables limited Node.js APIs in renderer
 - Dev server proxies API requests to `localhost:9587` (Electron main)
 
-### electron-builder.yml
+### electron-builder configuration (`package.json`)
 
-```yaml
-appId: com.nyaaviewer.app
-productName: NyaaViewer
-directories:
-  output: release/
-files: [dist, dist-electron, bin/**/*]
-
-# Windows: NSIS (not one-click, per-machine, custom install dir allowed)
-# macOS: DMG + zip, category: entertainment
-# Linux: AppImage, category: Utility
-# Publish: GitHub Releases → WardenPro/NyaaViewer
-```
+The project now uses the `build` field inside `package.json` as the single source of truth for electron-builder.
 
 ### index.html
 

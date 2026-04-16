@@ -1,33 +1,27 @@
+import useAppStore from '../store/appStore';
+import type { NyaaResult } from '../types/nyaa';
 import { useNavigate } from 'react-router-dom';
 
 interface TrendingSectionProps {
-  results: Array<{
-    title: string;
-    size: string;
-    seeders: number;
-    leechers: number;
-    date: string;
-    infohash: string;
-    magnetUri: string;
-  }>;
+  results: NyaaResult[];
 }
 
 export default function TrendingSection({ results }: TrendingSectionProps) {
   const navigate = useNavigate();
+  const setSearchQuery = useAppStore((state) => state.setSearchQuery);
+  const setSearchResults = useAppStore((state) => state.setSearchResults);
 
-  const handleClick = (result: any) => {
-    navigate('/search', { state: { initialResult: result } });
-    // Also set search results in store
-    const store = (window as any).electronAPI?.searchNyaa ? null : null;
-    // Navigate with the result so PlayerPage can use it if user chooses to watch
-    useAppStore.getState().setSearchResults([result]);
+  const handleClick = (result: NyaaResult) => {
+    setSearchQuery(result.title);
+    setSearchResults([result]);
+    navigate('/search');
   };
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-xl font-semibold">Trending on Nyaa</h3>
-        <span className="text-sm text-dark-textMuted">Most seeded right now</span>
+        <h3 className="text-xl font-semibold">Tendances sur Nyaa</h3>
+        <span className="text-sm text-dark-textMuted">Les torrents les plus seedés du moment</span>
       </div>
 
       <div className="grid gap-3">
@@ -53,6 +47,3 @@ export default function TrendingSection({ results }: TrendingSectionProps) {
     </div>
   );
 }
-
-// Import at top level to avoid hoisting issues
-import useAppStore from '../store/appStore';

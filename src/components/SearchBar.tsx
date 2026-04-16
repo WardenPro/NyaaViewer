@@ -1,23 +1,44 @@
-import { useState } from 'react';
+import { useState, type FormEvent, type KeyboardEvent } from 'react';
 
 interface SearchBarProps {
   onSearch: (query: string) => void;
   placeholder?: string;
+  value?: string;
+  onValueChange?: (query: string) => void;
 }
 
-export default function SearchBar({ onSearch, placeholder = 'Search anime on nyaa.si...' }: SearchBarProps) {
-  const [query, setQuery] = useState('');
+export default function SearchBar({
+  onSearch,
+  placeholder = 'Rechercher un anime sur nyaa.si...',
+  value,
+  onValueChange,
+}: SearchBarProps) {
+  const [internalQuery, setInternalQuery] = useState(value ?? '');
+  const query = value ?? internalQuery;
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (query.trim()) {
-      onSearch(query.trim());
+  const updateQuery = (nextQuery: string) => {
+    if (value === undefined) {
+      setInternalQuery(nextQuery);
+    }
+    onValueChange?.(nextQuery);
+  };
+
+  const submitSearch = () => {
+    const trimmedQuery = query.trim();
+    if (trimmedQuery) {
+      onSearch(trimmedQuery);
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && query.trim()) {
-      handleSubmit(e);
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    submitSearch();
+  };
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      submitSearch();
     }
   };
 
@@ -27,7 +48,7 @@ export default function SearchBar({ onSearch, placeholder = 'Search anime on nya
         <input
           type="text"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => updateQuery(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           className="input-field w-full pr-4"
@@ -35,7 +56,7 @@ export default function SearchBar({ onSearch, placeholder = 'Search anime on nya
       </div>
 
       <button type="submit" className="btn-primary px-6">
-        Search
+        Rechercher
       </button>
     </form>
   );
