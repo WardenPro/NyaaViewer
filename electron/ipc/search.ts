@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron';
-import { searchNyaa, getTrending, NyaaSearchOptions } from '../services/nyaa';
+import { searchNyaa, getTrending, type NyaaSearchOptions } from '../services/nyaa';
 import { getWeeklySchedule } from '../services/schedule';
 
 export function registerSearchHandlers(): void {

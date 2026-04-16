@@ -1,5 +1,6 @@
 import { XMLParser } from 'fast-xml-parser';
 import type { NyaaResult, NyaaSearchOptions } from '../../src/types/nyaa';
+export type { NyaaResult, NyaaSearchOptions };
 
 const NYAA_BASE = 'https://nyaa.si';
 const NYAA_RSS = `${NYAA_BASE}/?page=rss`;
