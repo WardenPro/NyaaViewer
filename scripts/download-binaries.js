@@ -76,8 +76,13 @@ async function main() {
 
       console.log(`✓ ${name} installé : ${destinationPath}`);
     } catch (error) {
-      console.error(`✗ Échec pour ${name} : ${error.message}`);
-      process.exitCode = 1;
+      if (isMac && name === 'mediainfo') {
+        console.warn(`! Avertissement pour ${name} : ${error.message}`);
+        console.warn(`  Le build continuera sans ${name}. Installez-le manuellement si nécessaire (brew install mediainfo).`);
+      } else {
+        console.error(`✗ Échec pour ${name} : ${error.message}`);
+        process.exitCode = 1;
+      }
     } finally {
       safeRemove(archivePath);
       safeRemove(extractDir);
